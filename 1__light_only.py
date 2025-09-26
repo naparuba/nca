@@ -1,6 +1,9 @@
 import torch
 import matplotlib.pyplot as plt
 
+# Just un affichage sur 10 steps de la diffusion de la lumière dans une grille 2D
+# avec une source fixe au centre
+
 # --- Config
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 GRID_SIZE = 16

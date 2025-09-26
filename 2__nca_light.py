@@ -5,6 +5,12 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import random
 
+## Simulation d'une diffusion simple (moyenne locale) dans une grille 2D
+## avec une source fixe au centre.
+## On entraîne un NCA (Neural Cellular Automaton) pour apprendre cette dynamique.
+## et on affiche le résultat au fil du temps
+
+
 # =========================================================
 # CONFIGURATION GLOBALE (modifiable)
 # =========================================================
