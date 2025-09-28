@@ -59,15 +59,15 @@ def find_output_directories(seed=None):
     """
     if seed is not None:
         # Cherche un répertoire spécifique
-        pattern = f"6__nca_outputs_heat_diffuse_then_refuse_seed_{seed}"
+        pattern = f"6__nca_outputs_heat_diffuse_fast_mode_seed_{seed}"
         dirs = [Path(pattern)] if Path(pattern).exists() else []
     else:
         # Cherche tous les répertoires avec pattern
-        pattern = "6__nca_outputs_heat_diffuse_then_refuse_seed_*"
+        pattern = "6__nca_outputs_heat_diffuse_fast_mode_seed_*"
         dirs = [Path(d) for d in glob.glob(pattern) if Path(d).is_dir()]
 
         # Ajoute aussi l'ancien format sans seed
-        old_format = Path("6__nca_outputs_heat_diffuse_then_refuse")
+        old_format = Path("6__nca_outputs_heat_diffuse_fast_mode")
         if old_format.exists():
             dirs.append(old_format)
 
@@ -411,11 +411,11 @@ def main():
     if not output_dirs:
         if args.seed:
             print(f"❌ Aucun répertoire trouvé pour la seed {args.seed}")
-            print(f"   Cherché: 6__nca_outputs_heat_diffuse_then_refuse_seed_{args.seed}")
+            print(f"   Cherché: 6__nca_outputs_heat_diffuse_fast_mode_seed_{args.seed}")
         else:
             print("❌ Aucun répertoire de sortie NCA trouvé.")
-            print("   Patterns cherchés: 6__nca_outputs_heat_diffuse_then_refuse_seed_*, 6__nca_outputs_heat_diffuse_then_refuse")
-        print("   Lancez d'abord l'entraînement avec : python 6__nca_heat_diffuse_then_refuse.py")
+            print("   Patterns cherchés: 6__nca_outputs_heat_diffuse_fast_mode_seed_*, 6__nca_outputs_heat_diffuse_fast_mode")
+        print("   Lancez d'abord l'entraînement avec : python 6__nca_heat_diffuse_fast_mode.py")
         return
     
     print(f"📁 Trouvé {len(output_dirs)} répertoire(s) de sortie:")

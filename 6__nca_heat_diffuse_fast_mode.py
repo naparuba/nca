@@ -37,7 +37,7 @@ class Config:
         self.PREVIS_STEPS = 30
         self.POSTVIS_STEPS = 50
         self.SAVE_ANIMATIONS = True  # Sauvegarde des animations si pas d'affichage interactif
-        self.OUTPUT_DIR = "6__nca_outputs_heat_diffuse_then_refuse"  # Nouveau répertoire pour les résultats heat diffuse then refuse
+        self.OUTPUT_DIR = "6__nca_outputs_heat_diffuse_fast_mode"  # Nouveau répertoire pour les résultats heat diffuse then refuse
 
         # Paramètres du modèle
         self.HIDDEN_SIZE = 128  # Augmenté pour plus de capacité
@@ -152,7 +152,7 @@ torch.manual_seed(cfg.SEED)
 np.random.seed(cfg.SEED)
 
 # Création du dossier de sortie avec seed dans le nom pour différencier
-cfg.OUTPUT_DIR = f"6__nca_outputs_heat_diffuse_then_refuse_seed_{cfg.SEED}"
+cfg.OUTPUT_DIR = f"6__nca_outputs_heat_diffuse_fast_mode_seed_{cfg.SEED}"
 if cfg.SAVE_ANIMATIONS:
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
