@@ -37,7 +37,7 @@ class Config:
         self.PREVIS_STEPS = 30
         self.POSTVIS_STEPS = 50
         self.SAVE_ANIMATIONS = True  # Sauvegarde des animations si pas d'affichage interactif
-        self.OUTPUT_DIR = "5__nca_outputs_with_walls"  # Nouveau répertoire pour les résultats avec obstacles
+        self.OUTPUT_DIR = "6__nca_outputs_heat_diffuse_then_refuse"  # Nouveau répertoire pour les résultats heat diffuse then refuse
 
         # Paramètres du modèle
         self.HIDDEN_SIZE = 128  # Augmenté pour plus de capacité
@@ -57,7 +57,7 @@ def parse_arguments():
         Namespace avec les arguments parsés
     """
     parser = argparse.ArgumentParser(
-        description='Neural Cellular Automaton - Diffusion avec obstacles',
+        description='Neural Cellular Automaton - Diffusion de chaleur avec obstacles',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
@@ -145,7 +145,7 @@ torch.manual_seed(cfg.SEED)
 np.random.seed(cfg.SEED)
 
 # Création du dossier de sortie avec seed dans le nom pour différencier
-cfg.OUTPUT_DIR = f"5__nca_outputs_with_walls_seed_{cfg.SEED}"
+cfg.OUTPUT_DIR = f"6__nca_outputs_heat_diffuse_then_refuse_seed_{cfg.SEED}"
 if cfg.SAVE_ANIMATIONS:
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
@@ -162,11 +162,11 @@ class DiffusionSimulator:
     """
     Simulateur de diffusion de chaleur basé sur convolution avec obstacles.
     Représente le processus physique que le NCA doit apprendre à reproduire.
-    Les obstacles bloquent complètement la diffusion.
+    Les obstacles bloquent complètement la diffusion de chaleur.
     """
     def __init__(self, device: str = cfg.DEVICE):
         # Kernel de diffusion : moyenne des 8 voisins + centre
-        # Simule l'équation de diffusion discrétisée
+        # Simule l'équation de diffusion de chaleur discrétisée
         self.kernel = torch.ones((1, 1, 3, 3), device=device) / 9.0
         self.device = device
 
@@ -176,7 +176,7 @@ class DiffusionSimulator:
 
         Args:
             size: Taille de la grille
-            source_pos: Position de la source (i, j) à éviter
+            source_pos: Position de la source de chaleur (i, j) à éviter
             seed: Graine pour la reproductibilité
 
         Returns:
@@ -219,7 +219,7 @@ class DiffusionSimulator:
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
         """
-        Un pas de diffusion avec conditions aux bords, sources fixes et obstacles.
+        Un pas de diffusion de chaleur avec conditions aux bords, sources fixes et obstacles.
 
         Args:
             grid: Grille de température [H, W]
@@ -227,7 +227,7 @@ class DiffusionSimulator:
             obstacle_mask: Masque des obstacles [H, W]
 
         Returns:
-            Nouvelle grille après diffusion
+            Nouvelle grille après diffusion de chaleur
         """
         # Ajout des dimensions batch et channel pour la convolution
         x = grid.unsqueeze(0).unsqueeze(0)  # [1, 1, H, W]
@@ -235,17 +235,17 @@ class DiffusionSimulator:
         # Convolution avec padding pour conserver la taille
         new_grid = F.conv2d(x, self.kernel, padding=1).squeeze(0).squeeze(0)
 
-        # Les obstacles restent à 0 (pas de diffusion)
+        # Les obstacles restent à 0 (pas de diffusion de chaleur)
         new_grid[obstacle_mask] = 0.0
 
-        # Les sources restent à intensité constante (condition de Dirichlet)
+        # Les sources de chaleur restent à intensité constante (condition de Dirichlet)
         new_grid[source_mask] = grid[source_mask]
 
         return new_grid
 
     def generate_sequence(self, n_steps: int, size: int, seed: Optional[int] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
         """
-        Génère une séquence complète de diffusion avec source et obstacles aléatoires.
+        Génère une séquence complète de diffusion de chaleur avec source et obstacles aléatoires.
 
         Args:
             n_steps: Nombre d'étapes de simulation
@@ -253,7 +253,7 @@ class DiffusionSimulator:
             seed: Graine pour la reproductibilité
 
         Returns:
-            Liste des états de la grille, masque de la source, masque des obstacles
+            Liste des états de la grille de température, masque de la source de chaleur, masque des obstacles
         """
         # Positionnement aléatoire de la source (évite les bords)
         if seed is not None:
