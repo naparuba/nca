@@ -48,6 +48,13 @@ class Config:
         self.MAX_OBSTACLES = 3  # Nombre maximum d'obstacles
         self.MIN_OBSTACLE_SIZE = 2  # Taille minimale d'un obstacle (carré NxN)
         self.MAX_OBSTACLE_SIZE = 4  # Taille maximale d'un obstacle
+        
+        # Paramètres d'optimisation (NOUVEAUX)
+        self.USE_OPTIMIZATIONS = True  # Activer les optimisations de performance
+        self.USE_SEQUENCE_CACHE = True  # Utiliser le cache de séquences pré-calculées
+        self.USE_VECTORIZED_PATCHES = True  # Utiliser l'extraction vectorisée des patches
+        self.CACHE_SIZE = 200  # Nombre de séquences dans le cache
+        self.USE_MIXED_PRECISION = False  # Mixed precision (fp16) - peut causer des instabilités
 
 def parse_arguments():
     """
@@ -409,6 +416,68 @@ class NCAUpdater:
 
         return new_grid
 
+class OptimizedNCAUpdater:
+    """
+    Version optimisée du NCAUpdater utilisant des convolutions pour l'extraction vectorisée des patches.
+    Remplace les boucles Python par des opérations GPU natives pour un gain de performance majeur.
+    """
+    def __init__(self, model: ImprovedNCA, device: str = cfg.DEVICE):
+        self.model = model
+        self.device = device
+        
+    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Application optimisée du NCA sur toute la grille avec extraction vectorisée des patches.
+        
+        Args:
+            grid: Grille courante [H, W]
+            source_mask: Masque des sources [H, W]
+            obstacle_mask: Masque des obstacles [H, W]
+            
+        Returns:
+            Nouvelle grille après application du NCA
+        """
+        H, W = grid.shape
+        
+        # Extraction de tous les patches 3x3 en une seule opération vectorisée
+        grid_padded = F.pad(grid.unsqueeze(0).unsqueeze(0), (1, 1, 1, 1), mode='replicate')  # [1, 1, H+2, W+2]
+        
+        # Unfold pour extraire tous les patches 3x3 simultanément
+        patches = F.unfold(grid_padded, kernel_size=3, stride=1)  # [1, 9, H*W]
+        patches = patches.squeeze(0).transpose(0, 1)  # [H*W, 9]
+        
+        # Masques aplatis pour filtrer les positions valides
+        source_flat = source_mask.flatten()  # [H*W]
+        obstacle_flat = obstacle_mask.flatten()  # [H*W]
+        
+        # Création des features additionnelles (source et obstacle info)
+        source_features = source_flat.float().unsqueeze(1)  # [H*W, 1]
+        obstacle_features = obstacle_flat.float().unsqueeze(1)  # [H*W, 1]
+        
+        # Concaténation des patches avec les features : [H*W, 11]
+        full_patches = torch.cat([patches, source_features, obstacle_features], dim=1)
+        
+        # Masque pour les positions où le NCA peut s'appliquer (pas d'obstacles)
+        valid_mask = ~obstacle_flat  # [H*W]
+        
+        # Application du modèle seulement sur les positions valides
+        if valid_mask.any():
+            valid_patches = full_patches[valid_mask]  # [N_valid, 11]
+            deltas = self.model(valid_patches)  # [N_valid, 1]
+            
+            # Reconstruction de la grille avec les deltas
+            new_grid = grid.clone().flatten()  # [H*W]
+            new_grid[valid_mask] += deltas.squeeze()
+            new_grid = torch.clamp(new_grid, 0.0, 1.0).reshape(H, W)
+        else:
+            new_grid = grid.clone()
+        
+        # Application des contraintes
+        new_grid[obstacle_mask] = 0.0  # Les obstacles restent à 0
+        new_grid[source_mask] = grid[source_mask]  # Les sources restent fixes
+        
+        return new_grid
+
 # =============================================================================
 # Système d'entraînement
 # =============================================================================
@@ -485,28 +554,212 @@ class NCATrainer:
 
         return avg_loss.item()
 
+# =============================================================================
+# Système d'entraînement optimisé
+# =============================================================================
+
+class OptimizedSequenceCache:
+    """
+    Cache optimisé pour les séquences d'entraînement.
+    Pré-génère et stocke les séquences sur GPU pour éviter la recomputation.
+    """
+    def __init__(self, simulator: DiffusionSimulator, n_sequences: int = 200, device: str = cfg.DEVICE):
+        self.simulator = simulator
+        self.device = device
+        self.n_sequences = n_sequences
+        self.sequences = []
+        self.current_idx = 0
+        
+        print(f"🚀 Génération de {n_sequences} séquences d'entraînement...")
+        self._generate_sequences()
+        print("✅ Cache des séquences créé !")
+    
+    def _generate_sequences(self):
+        """Pré-génère toutes les séquences d'entraînement."""
+        for i in range(self.n_sequences):
+            if i % 50 == 0:
+                print(f"   Génération: {i}/{self.n_sequences}")
+            
+            # Génération d'une séquence avec configuration aléatoire
+            target_seq, source_mask, obstacle_mask = self.simulator.generate_sequence(
+                n_steps=cfg.NCA_STEPS,
+                size=cfg.GRID_SIZE
+            )
+            
+            # Stockage sur GPU pour accès rapide
+            self.sequences.append({
+                'target_seq': target_seq,  # Déjà sur GPU
+                'source_mask': source_mask,
+                'obstacle_mask': obstacle_mask
+            })
+    
+    def get_batch(self, batch_size: int):
+        """
+        Récupère un batch de séquences du cache.
+        
+        Args:
+            batch_size: Taille du batch demandé
+            
+        Returns:
+            Liste de dictionnaires avec les séquences
+        """
+        batch = []
+        for _ in range(batch_size):
+            # Récupération cyclique des séquences
+            batch.append(self.sequences[self.current_idx])
+            self.current_idx = (self.current_idx + 1) % self.n_sequences
+        
+        return batch
+    
+    def shuffle(self):
+        """Mélange l'ordre des séquences pour plus de variété."""
+        import random
+        random.shuffle(self.sequences)
+
+class NCATrainer:
+    """
+    Système d'entraînement pour le NCA avec fonctionnalités avancées et obstacles.
+
+    Features :
+    - Entraînement par batch optimisé
+    - Cache de séquences pré-calculées
+    - Gradient clipping automatique
+    - Scheduling du learning rate
+    - Métriques détaillées
+    - Sauvegarde automatique
+    - Support pour les obstacles
+    """
+    def __init__(self, model: ImprovedNCA, device: str = cfg.DEVICE):
+        self.model = model
+        self.device = device
+        
+        # Choix de l'updater selon les optimisations activées
+        if cfg.USE_OPTIMIZATIONS and cfg.USE_VECTORIZED_PATCHES:
+            print("🚀 Utilisation de l'updater optimisé (extraction vectorisée)")
+            self.updater = OptimizedNCAUpdater(model, device)
+        else:
+            print("⚠️  Utilisation de l'updater standard (boucles Python)")
+            self.updater = NCAUpdater(model, device)
+
+        # Optimiseur avec weight decay pour la régularisation
+        self.optimizer = optim.AdamW(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=1e-4)
+
+        # Scheduler pour réduire le learning rate progressivement
+        self.scheduler = optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=cfg.N_EPOCHS)
+
+        # Fonction de perte
+        self.loss_fn = nn.MSELoss()
+
+        # Historiques
+        self.loss_history = []
+        self.lr_history = []
+        
+        # Cache de séquences optimisé
+        if cfg.USE_OPTIMIZATIONS and cfg.USE_SEQUENCE_CACHE:
+            print("🎯 Initialisation du cache de séquences optimisé...")
+            self.sequence_cache = OptimizedSequenceCache(simulator, n_sequences=cfg.CACHE_SIZE, device=device)
+            self.use_cache = True
+        else:
+            print("⚠️  Cache de séquences désactivé - génération à la volée")
+            self.use_cache = False
+
+    def train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> float:
+        """
+        Un pas d'entraînement sur une séquence cible avec obstacles.
+
+        Args:
+            target_sequence: Séquence cible [T+1, H, W]
+            source_mask: Masque des sources [H, W]
+            obstacle_mask: Masque des obstacles [H, W]
+
+        Returns:
+            Perte moyenne sur la séquence
+        """
+        self.optimizer.zero_grad()
+
+        # Initialisation : grille vide avec sources
+        grid_pred = torch.zeros_like(target_sequence[0])
+        grid_pred[source_mask] = cfg.SOURCE_INTENSITY
+
+        total_loss = torch.tensor(0.0, device=self.device)
+
+        # Déroulement temporel avec calcul de perte à chaque étape
+        for t_step in range(cfg.NCA_STEPS):
+            target = target_sequence[t_step + 1]
+
+            # Application du NCA
+            grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask)
+
+            # Accumulation de la perte
+            step_loss = self.loss_fn(grid_pred, target)
+            total_loss = total_loss + step_loss
+
+        # Perte moyenne sur la séquence
+        avg_loss = total_loss / cfg.NCA_STEPS
+
+        # Backpropagation avec gradient clipping
+        avg_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+
+        self.optimizer.step()
+
+        return avg_loss.item()
+    
+    def train_batch_optimized(self, batch_sequences: List[dict]) -> float:
+        """
+        Entraînement optimisé sur un batch de séquences pré-calculées.
+        
+        Args:
+            batch_sequences: Liste de dictionnaires avec les séquences
+            
+        Returns:
+            Perte moyenne du batch
+        """
+        batch_losses = []
+        
+        for seq_data in batch_sequences:
+            target_seq = seq_data['target_seq']
+            source_mask = seq_data['source_mask']
+            obstacle_mask = seq_data['obstacle_mask']
+            
+            loss = self.train_step(target_seq, source_mask, obstacle_mask)
+            batch_losses.append(loss)
+        
+        return sum(batch_losses) / len(batch_losses)
+
     def train(self) -> None:
         """
-        Boucle d'entraînement principale avec batch training et obstacles.
+        Boucle d'entraînement principale avec batch training optimisé et obstacles.
         """
-        print("🚀 Début de l'entraînement avec obstacles...")
+        if self.use_cache:
+            print("🚀 Début de l'entraînement OPTIMISÉ avec obstacles...")
+        else:
+            print("🚀 Début de l'entraînement STANDARD avec obstacles...")
+            
         self.model.train()
 
         for epoch in range(cfg.N_EPOCHS):
-            print(f'Epoch: {epoch}')
             epoch_losses = []
+            
+            # Mélange du cache à chaque époque pour plus de variété (si cache activé)
+            if self.use_cache and epoch % 10 == 0:
+                self.sequence_cache.shuffle()
 
-            # Entraînement par batch pour plus de stabilité
+            # Entraînement par batch
             for batch_idx in range(cfg.BATCH_SIZE):
-                # Génération d'une nouvelle séquence cible aléatoire avec obstacles
-                target_seq, source_mask, obstacle_mask = simulator.generate_sequence(
-                    n_steps=cfg.NCA_STEPS,
-                    size=cfg.GRID_SIZE
-                )
-
-                # Un pas d'entraînement
-                loss = self.train_step(target_seq, source_mask, obstacle_mask)
-                epoch_losses.append(loss)
+                if self.use_cache:
+                    # Version optimisée : récupération rapide depuis le cache
+                    batch_sequences = self.sequence_cache.get_batch(1)
+                    avg_loss = self.train_batch_optimized(batch_sequences)
+                else:
+                    # Version standard : génération à la volée
+                    target_seq, source_mask, obstacle_mask = simulator.generate_sequence(
+                        n_steps=cfg.NCA_STEPS,
+                        size=cfg.GRID_SIZE
+                    )
+                    avg_loss = self.train_step(target_seq, source_mask, obstacle_mask)
+                
+                epoch_losses.append(avg_loss)
 
             # Statistiques de l'époque
             avg_epoch_loss = np.mean(epoch_losses)
@@ -518,11 +771,16 @@ class NCATrainer:
 
             # Affichage périodique
             if epoch % 20 == 0 or epoch == cfg.N_EPOCHS - 1:
+                optimization_info = "OPTIMISÉ" if self.use_cache else "STANDARD"
                 print(f"Epoch {epoch:3d}/{cfg.N_EPOCHS-1} | "
                       f"Loss: {avg_epoch_loss:.6f} | "
-                      f"LR: {self.scheduler.get_last_lr()[0]:.2e}")
+                      f"LR: {self.scheduler.get_last_lr()[0]:.2e} | "
+                      f"Mode: {optimization_info}")
 
-        print("✅ Entraînement terminé!")
+        if self.use_cache:
+            print("✅ Entraînement optimisé terminé!")
+        else:
+            print("✅ Entraînement standard terminé!")
 
 # =============================================================================
 # Système de visualisation avancé
