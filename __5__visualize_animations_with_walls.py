@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Script de visualisation des animations NCA sauvegardées avec diffusion de chaleur et obstacles.
-Permet de voir les résultats de l'entraînement et comparer avec la simulation physique cible.
+Script de visualisation des animations NCA sauvegardées avec obstacles.
+Permet de voir les résultats de l'entraînement et comparer avec la simulation cible.
 """
 
 import numpy as np
@@ -20,7 +20,7 @@ def parse_arguments():
         Namespace avec les arguments parsés
     """
     parser = argparse.ArgumentParser(
-        description='Visualiseur d\'animations NCA diffusion de chaleur avec obstacles',
+        description='Visualiseur d\'animations NCA avec obstacles',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
@@ -59,15 +59,15 @@ def find_output_directories(seed=None):
     """
     if seed is not None:
         # Cherche un répertoire spécifique
-        pattern = f"6__nca_outputs_heat_diffuse_fast_mode_seed_{seed}"
+        pattern = f"__5__nca_outputs_with_walls_seed_{seed}"
         dirs = [Path(pattern)] if Path(pattern).exists() else []
     else:
         # Cherche tous les répertoires avec pattern
-        pattern = "6__nca_outputs_heat_diffuse_fast_mode_seed_*"
+        pattern = "__5__nca_outputs_with_walls_seed_*"
         dirs = [Path(d) for d in glob.glob(pattern) if Path(d).is_dir()]
 
         # Ajoute aussi l'ancien format sans seed
-        old_format = Path("6__nca_outputs_heat_diffuse_fast_mode")
+        old_format = Path("__5__nca_outputs_with_walls")
         if old_format.exists():
             dirs.append(old_format)
 
@@ -81,7 +81,7 @@ def load_animation_data(filepath):
         filepath: Chemin vers le fichier d'animation
     
     Returns:
-        Liste des frames avec données NCA, température cible et obstacles
+        Liste des frames avec données NCA, cible et obstacles
     """
     try:
         frames = np.load(filepath, allow_pickle=True)
@@ -93,7 +93,7 @@ def load_animation_data(filepath):
 
 def create_comparison_gif(frames_data, output_path, title, fps=10):
     """
-    Crée un GIF animé comparant NCA et simulation de diffusion de chaleur cible avec obstacles
+    Crée un GIF animé comparant NCA et simulation cible avec obstacles
 
     Args:
         frames_data: Données des frames
@@ -127,7 +127,7 @@ def create_comparison_gif(frames_data, output_path, title, fps=10):
 
     # Panneau 2: Cible
     im2 = axes[1].imshow(target_grid, cmap='plasma', vmin=0, vmax=1, animated=True)
-    axes[1].set_title('Cible (Simulation de diffusion de chaleur)')
+    axes[1].set_title('Cible (Simulation physique)')
     axes[1].set_xlabel('Position X')
     axes[1].set_ylabel('Position Y')
 
@@ -138,20 +138,20 @@ def create_comparison_gif(frames_data, output_path, title, fps=10):
     axes[2].set_xlabel('Position X')
     axes[2].set_ylabel('Position Y')
 
-    # Panneau 4: Obstacles et sources de chaleur (si disponibles)
+    # Panneau 4: Obstacles et sources (si disponibles)
     if has_obstacles:
-        # Création d'une image composite pour obstacles et sources de chaleur
+        # Création d'une image composite pour obstacles et sources
         composite = np.zeros((*obstacle_mask.shape, 3))  # RGB
         # Obstacles en gris foncé
         composite[obstacle_mask] = [0.3, 0.3, 0.3]
-        # Sources de chaleur en rouge
+        # Sources en rouge
         composite[source_mask] = [1.0, 0.0, 0.0]
         # Zones libres en transparent (blanc très clair)
         free_areas = ~(obstacle_mask | source_mask)
         composite[free_areas] = [0.95, 0.95, 0.95]
 
         im4 = axes[3].imshow(composite, animated=False)  # Statique
-        axes[3].set_title('Obstacles (gris) et Source chaleur (rouge)')
+        axes[3].set_title('Obstacles (gris) et Source (rouge)')
     else:
         # Si pas d'obstacles, afficher juste la différence à nouveau
         im4 = axes[3].imshow(diff, cmap='viridis', vmin=0, vmax=0.5, animated=True)
@@ -161,8 +161,8 @@ def create_comparison_gif(frames_data, output_path, title, fps=10):
     axes[3].set_ylabel('Position Y')
 
     # Barres de couleur
-    plt.colorbar(im1, ax=axes[0], label='Température')
-    plt.colorbar(im2, ax=axes[1], label='Température')
+    plt.colorbar(im1, ax=axes[0], label='Intensité')
+    plt.colorbar(im2, ax=axes[1], label='Intensité')
     plt.colorbar(im3, ax=axes[2], label='Erreur absolue')
 
     plt.tight_layout()
@@ -264,7 +264,7 @@ def create_static_comparison(frames_data, output_path, title, steps_to_show=[0, 
         if i == 0:
             axes[2, i].set_ylabel('Position Y')
         
-        # Obstacles et sources de chaleur (si disponibles)
+        # Obstacles et sources (si disponibles)
         if has_obstacles:
             obstacle_mask = frame['obstacle_mask']
             source_mask = frame['source_mask'] if 'source_mask' in frame else np.zeros_like(obstacle_mask)
@@ -272,12 +272,12 @@ def create_static_comparison(frames_data, output_path, title, steps_to_show=[0, 
             # Image composite
             composite = np.zeros((*obstacle_mask.shape, 3))
             composite[obstacle_mask] = [0.3, 0.3, 0.3]  # Gris foncé pour obstacles
-            composite[source_mask] = [1.0, 0.0, 0.0]    # Rouge pour sources de chaleur
+            composite[source_mask] = [1.0, 0.0, 0.0]    # Rouge pour sources
             free_areas = ~(obstacle_mask | source_mask)
             composite[free_areas] = [0.95, 0.95, 0.95]  # Blanc cassé pour zones libres
 
             axes[3, i].imshow(composite)
-            axes[3, i].set_title(f'Obstacles & Source chaleur - Étape {step_idx+1}')
+            axes[3, i].set_title(f'Obstacles & Source - Étape {step_idx+1}')
             axes[3, i].set_xlabel('Position X')
             if i == 0:
                 axes[3, i].set_ylabel('Position Y')
@@ -296,8 +296,8 @@ def create_static_comparison(frames_data, output_path, title, steps_to_show=[0, 
                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
     
     # Barres de couleur
-    plt.colorbar(im1, ax=axes[0, :], label='Température', shrink=0.8)
-    plt.colorbar(im2, ax=axes[1, :], label='Température', shrink=0.8)
+    plt.colorbar(im1, ax=axes[0, :], label='Intensité', shrink=0.8)
+    plt.colorbar(im2, ax=axes[1, :], label='Intensité', shrink=0.8)
     plt.colorbar(im3, ax=axes[2, :], label='Erreur absolue', shrink=0.8)
     
     title_suffix = " avec obstacles" if has_obstacles else ""
@@ -396,7 +396,7 @@ def main():
     Fonction principale de visualisation avec support des obstacles et seed.
     """
     print("=" * 60)
-    print("🎬 Visualiseur d'animations NCA avec diffusion de chaleur et obstacles")
+    print("🎬 Visualiseur d'animations NCA avec obstacles")
     print("=" * 60)
     
     # Parse des arguments
@@ -411,11 +411,11 @@ def main():
     if not output_dirs:
         if args.seed:
             print(f"❌ Aucun répertoire trouvé pour la seed {args.seed}")
-            print(f"   Cherché: 6__nca_outputs_heat_diffuse_fast_mode_seed_{args.seed}")
+            print(f"   Cherché: 5__nca_outputs_with_walls_seed_{args.seed}")
         else:
             print("❌ Aucun répertoire de sortie NCA trouvé.")
-            print("   Patterns cherchés: 6__nca_outputs_heat_diffuse_fast_mode_seed_*, 6__nca_outputs_heat_diffuse_fast_mode")
-        print("   Lancez d'abord l'entraînement avec : python 6__nca_heat_diffuse_fast_mode.py")
+            print("   Patterns cherchés: 5__nca_outputs_with_walls_seed_*, 5__nca_outputs_with_walls")
+        print("   Lancez d'abord l'entraînement avec : python nca_light_diffuse_with_walls.py")
         return
     
     print(f"📁 Trouvé {len(output_dirs)} répertoire(s) de sortie:")

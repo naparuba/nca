@@ -222,7 +222,7 @@ def analyze_convergence(frames_data, title):
     plt.suptitle(f"{title} - Analyse de convergence")
     plt.tight_layout()
     
-    output_path = f"nca_outputs/convergence_{title.lower().replace(' ', '_')}.png"
+    output_path = f"__4_nca_outputs/convergence_{title.lower().replace(' ', '_')}.png"
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
     print(f"✅ Analyse de convergence sauvegardée: {output_path}")
@@ -240,7 +240,7 @@ def main():
     print("🎬 Visualiseur d'animations NCA")
     print("=" * 60)
     
-    output_dir = Path("nca_outputs")
+    output_dir = Path("__4_nca_outputs")
     if not output_dir.exists():
         print("❌ Dossier nca_outputs non trouvé. Lancez d'abord l'entraînement.")
         return

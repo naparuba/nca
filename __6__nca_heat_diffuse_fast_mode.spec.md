@@ -231,7 +231,7 @@ Pour chaque époque:
 
 ### Structure répertoires de sortie
 ```
-6__nca_outputs_heat_diffuse_fast_mode_seed_{SEED}/
+__6__nca_outputs_heat_diffuse_fast_mode_seed_{SEED}/
 ├── animation_avant_entraînement.npy
 ├── animation_après_entraînement.npy
 ├── gif_animation_avant_entraînement.gif
@@ -444,7 +444,7 @@ Entraîner un NCA à reproduire fidèlement le comportement de diffusion thermiq
 
 ## Arguments de Ligne de Commande
 
-**Script principal (`6__nca_heat_diffuse_fast_mode.py`) :**
+**Script principal (`__6__nca_heat_diffuse_fast_mode.py`) :**
 ```bash
 --seed INT          # Graine d'entraînement (défaut: 123)
 --vis-seed INT      # Graine de visualisation (défaut: 3333)  
@@ -464,7 +464,7 @@ Entraîner un NCA à reproduire fidèlement le comportement de diffusion thermiq
 
 **Structure du répertoire de sortie :**
 ```
-6__nca_outputs_heat_diffuse_fast_mode_seed_{SEED}/
+__6__nca_outputs_heat_diffuse_fast_mode_seed_{SEED}/
 ├── animation_avant_entraînement.npy      # Animation pré-entraînement
 ├── animation_après_entraînement.npy      # Animation post-entraînement
 ├── gif_animation_avant_entraînement.gif  # GIF pré-entraînement

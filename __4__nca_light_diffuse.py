@@ -35,7 +35,7 @@ class Config:
     PREVIS_STEPS = 30
     POSTVIS_STEPS = 50
     SAVE_ANIMATIONS = True  # Sauvegarde des animations si pas d'affichage interactif
-    OUTPUT_DIR = "nca_outputs"
+    OUTPUT_DIR = "__4_nca_outputs"
 
     # Paramètres du modèle
     HIDDEN_SIZE = 128  # Augmenté pour plus de capacité

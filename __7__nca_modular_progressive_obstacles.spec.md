@@ -125,7 +125,7 @@ Hérite de NCAVisualizer (v6) avec ajouts:
 - **Robustesse** face aux variations de format des métriques
 
 ### Répertoire de Sortie
-`7__nca_outputs_modular_progressive_obstacles_seed_XXX/`
+`__7__nca_outputs_modular_progressive_obstacles_seed_XXX/`
 ```
 ├── stage_1/                                    # Résultats étape 1
 │   ├── animation_après_entraînement.npy
@@ -224,13 +224,13 @@ Le fichier `complete_metrics.json` contient :
 ### Utilisation Standard
 ```bash
 # Génération du rapport complet
-python 7__visualize_modular_progressive_obstacles.py \
-    7__nca_outputs_modular_progressive_obstacles_seed_123 \
+python __7__visualize_modular_progressive_obstacles.py \
+    __7__nca_outputs_modular_progressive_obstacles_seed_123 \
     --comprehensive
 
 # Visualisation basique (vue d'ensemble seulement)
-python 7__visualize_modular_progressive_obstacles.py \
-    7__nca_outputs_modular_progressive_obstacles_seed_123
+python __7__visualize_modular_progressive_obstacles.py \
+    __7__nca_outputs_modular_progressive_obstacles_seed_123
 ```
 
 ### Arguments Disponibles

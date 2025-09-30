@@ -12,14 +12,17 @@ import json
 import time
 from pathlib import Path
 
+# Import du module de visualisation v8__
+from __8_visualize_modular_progressive_obstacles_variable_intensity import create_complete_visualization_suite
+
 # =============================================================================
 # Configuration et initialisation modulaire
 # =============================================================================
 
 class ModularConfig:
     """
-    Configuration étendue pour l'apprentissage modulaire progressif.
-    Hérite des paramètres de base et ajoute la gestion des étapes.
+    Configuration étendue pour l'apprentissage modulaire progressif avec intensités variables (Version 8__).
+    Hérite des paramètres de base et ajoute la gestion des étapes avec intensités variables.
     """
     def __init__(self, seed: int = 123):
         # Paramètres matériels de base
@@ -31,7 +34,7 @@ class ModularConfig:
         self.SOURCE_INTENSITY = 1.0
 
         # Paramètres d'entraînement modulaire
-        self.TOTAL_EPOCHS = 200  # Augmenté pour l'apprentissage modulaire
+        self.TOTAL_EPOCHS = 500  # Augmenté pour l'apprentissage modulaire
         self.NCA_STEPS = 20
         self.LEARNING_RATE = 1e-3
         self.BATCH_SIZE = 4
@@ -40,22 +43,42 @@ class ModularConfig:
         self.MODULAR_TRAINING = True
         self.ENABLE_CURRICULUM = True
         self.ADAPTIVE_THRESHOLDS = True
-        
-        # Répartition des étapes (ratios des époques totales)
-        self.STAGE_1_RATIO = 0.5  # 50% - Sans obstacles
-        self.STAGE_2_RATIO = 0.3  # 30% - Un obstacle
-        self.STAGE_3_RATIO = 0.2  # 20% - Obstacles multiples
-        
+
+        # === NOUVEAUX PARAMÈTRES VERSION 8__ ===
+        # Répartition des étapes modifiée (ratios des époques totales)
+        self.STAGE_1_RATIO = 0.3  # 30% - Sans obstacles (modifié de 0.5)
+        self.STAGE_2_RATIO = 0.3  # 30% - Un obstacle (inchangé)
+        self.STAGE_3_RATIO = 0.2  # 20% - Obstacles multiples (inchangé)
+        self.STAGE_4_RATIO = 0.2  # 20% - Intensités variables (NOUVEAU)
+
         # Calcul automatique des époques par étape
         self.STAGE_1_EPOCHS = int(self.TOTAL_EPOCHS * self.STAGE_1_RATIO)
         self.STAGE_2_EPOCHS = int(self.TOTAL_EPOCHS * self.STAGE_2_RATIO)
         self.STAGE_3_EPOCHS = int(self.TOTAL_EPOCHS * self.STAGE_3_RATIO)
+        self.STAGE_4_EPOCHS = int(self.TOTAL_EPOCHS * self.STAGE_4_RATIO)  # NOUVEAU
 
-        # Seuils de convergence adaptatifs par étape
+        # Paramètres intensités variables (NOUVEAU)
+        self.VARIABLE_INTENSITY_TRAINING = True
+        self.MIN_SOURCE_INTENSITY = 0.0    # Intensité minimale (éteint)
+        self.MAX_SOURCE_INTENSITY = 1.0    # Intensité maximale (standard)
+        self.DEFAULT_SOURCE_INTENSITY = 1.0 # Intensité de référence (étapes 1-3)
+
+        # Configuration simple pour étape 4 (NOUVEAU)
+        self.STAGE_4_SOURCE_CONFIG = {
+            'intensity_distribution': 'uniform',       # Distribution des intensités
+            'sample_per_simulation': True,            # Nouvelle intensité à chaque simulation
+            'fixed_during_simulation': True,          # Intensité fixe pendant la simulation
+            'intensity_range_expansion': True,        # Élargir progressivement la plage
+            'initial_range': [0.5, 1.0],            # Plage initiale restreinte
+            'final_range': [0.0, 1.0]               # Plage finale complète
+        }
+
+        # Seuils de convergence adaptatifs par étape (CORRIGÉ)
         self.CONVERGENCE_THRESHOLDS = {
-            1: 0.01,  # Étape 1: convergence stricte
-            2: 0.02,  # Étape 2: tolérance accrue
-            3: 0.05   # Étape 3: tolérance maximale
+            1: 0.0002,  # Étape 1
+            2: 0.0002,  # Étape 2
+            3: 0.0002,  # Étape 3
+            4: 0.0002,   # Étape 4
         }
 
         # Paramètres de visualisation
@@ -63,19 +86,20 @@ class ModularConfig:
         self.POSTVIS_STEPS = 50
         self.SAVE_ANIMATIONS = True
         self.SAVE_STAGE_CHECKPOINTS = True
-        self.OUTPUT_DIR = "7__nca_outputs_modular_progressive_obstacles"
+        self.OUTPUT_DIR = "__8__nca_outputs_modular_progressive_obstacles_variable_intensity"  # MODIFIÉ
 
         # Paramètres du modèle
         self.HIDDEN_SIZE = 128
         self.N_LAYERS = 3
 
-        # Paramètres d'obstacles par étape
+        # Paramètres d'obstacles par étape (ÉTENDU)
         self.STAGE_OBSTACLE_CONFIG = {
             1: {'min_obstacles': 0, 'max_obstacles': 0},  # Pas d'obstacles
             2: {'min_obstacles': 1, 'max_obstacles': 1},  # Un seul obstacle
-            3: {'min_obstacles': 2, 'max_obstacles': 4}   # 2-4 obstacles
+            3: {'min_obstacles': 2, 'max_obstacles': 4},  # 2-4 obstacles
+            4: {'min_obstacles': 1, 'max_obstacles': 2}   # 1-2 obstacles (NOUVEAU)
         }
-        
+
         self.MIN_OBSTACLE_SIZE = 2
         self.MAX_OBSTACLE_SIZE = 4
 
@@ -105,7 +129,7 @@ def parse_modular_arguments():
                        help='Graine aléatoire pour la reproductibilité')
     parser.add_argument('--vis-seed', type=int, default=3333,
                        help='Graine pour les visualisations')
-    parser.add_argument('--total-epochs', type=int, default=200,
+    parser.add_argument('--total-epochs', type=int, default=500,
                        help='Nombre total d\'époques d\'entraînement')
     parser.add_argument('--grid-size', type=int, default=16,
                        help='Taille de la grille')
@@ -113,13 +137,15 @@ def parse_modular_arguments():
                        help='Taille des batches')
 
     # Arguments modulaires (NOUVEAUX)
-    parser.add_argument('--stage1-ratio', type=float, default=0.5,
+    parser.add_argument('--stage1-ratio', type=float, default=0.3,
                        help='Ratio d\'époques pour l\'étape 1 (sans obstacles)')
     parser.add_argument('--stage2-ratio', type=float, default=0.3,
                        help='Ratio d\'époques pour l\'étape 2 (un obstacle)')
     parser.add_argument('--stage3-ratio', type=float, default=0.2,
                        help='Ratio d\'époques pour l\'étape 3 (obstacles multiples)')
-    
+    parser.add_argument('--stage4-ratio', type=float, default=0.2,
+                       help='Ratio d\'époques pour l\'étape 4 (intensités variables)')
+
     parser.add_argument('--enable-curriculum', action='store_true', default=True,
                        help='Activer l\'apprentissage par curriculum')
     parser.add_argument('--adaptive-thresholds', action='store_true', default=True,
@@ -142,6 +168,7 @@ cfg.BATCH_SIZE = args.batch_size
 cfg.STAGE_1_RATIO = args.stage1_ratio
 cfg.STAGE_2_RATIO = args.stage2_ratio
 cfg.STAGE_3_RATIO = args.stage3_ratio
+cfg.STAGE_4_RATIO = args.stage4_ratio
 cfg.ENABLE_CURRICULUM = args.enable_curriculum
 cfg.ADAPTIVE_THRESHOLDS = args.adaptive_thresholds
 cfg.SAVE_STAGE_CHECKPOINTS = args.save_stage_checkpoints
@@ -150,6 +177,7 @@ cfg.SAVE_STAGE_CHECKPOINTS = args.save_stage_checkpoints
 cfg.STAGE_1_EPOCHS = int(cfg.TOTAL_EPOCHS * cfg.STAGE_1_RATIO)
 cfg.STAGE_2_EPOCHS = int(cfg.TOTAL_EPOCHS * cfg.STAGE_2_RATIO)
 cfg.STAGE_3_EPOCHS = int(cfg.TOTAL_EPOCHS * cfg.STAGE_3_RATIO)
+cfg.STAGE_4_EPOCHS = int(cfg.TOTAL_EPOCHS * cfg.STAGE_4_RATIO)  # NOUVEAU
 
 # Configuration max obstacles étape 3
 cfg.STAGE_OBSTACLE_CONFIG[3]['max_obstacles'] = args.max_obstacles
@@ -181,12 +209,12 @@ def setup_matplotlib():
 interactive_mode = setup_matplotlib()
 if os.name == 'nt':
     interactive_mode = False
-    
+
 torch.manual_seed(cfg.SEED)
 np.random.seed(cfg.SEED)
 
 # Création du répertoire de sortie avec seed
-cfg.OUTPUT_DIR = f"7__nca_outputs_modular_progressive_obstacles_seed_{cfg.SEED}"
+cfg.OUTPUT_DIR = f"__8__nca_outputs_modular_progressive_obstacles_variable_intensity_seed_{cfg.SEED}"
 if cfg.SAVE_ANIMATIONS:
     os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
 
@@ -197,7 +225,7 @@ print(f"Mode interactif: {interactive_mode}")
 print(f"Répertoire de sortie: {cfg.OUTPUT_DIR}")
 print(f"Apprentissage modulaire: {cfg.MODULAR_TRAINING}")
 print(f"Curriculum learning: {cfg.ENABLE_CURRICULUM}")
-print(f"Étapes: {cfg.STAGE_1_EPOCHS} + {cfg.STAGE_2_EPOCHS} + {cfg.STAGE_3_EPOCHS} = {cfg.TOTAL_EPOCHS} époques")
+print(f"Étapes: {cfg.STAGE_1_EPOCHS} + {cfg.STAGE_2_EPOCHS} + {cfg.STAGE_3_EPOCHS} + {cfg.STAGE_4_EPOCHS} = {cfg.TOTAL_EPOCHS} époques")
 
 # =============================================================================
 # Gestionnaire d'obstacles progressifs
@@ -208,130 +236,189 @@ class ProgressiveObstacleManager:
     Gestionnaire intelligent des obstacles selon l'étape d'apprentissage.
     Génère des environnements appropriés pour chaque phase du curriculum.
     """
-    
+
     def __init__(self, device: str = cfg.DEVICE):
         self.device = device
         self.stage_configs = cfg.STAGE_OBSTACLE_CONFIG
-        
-    def generate_stage_environment(self, stage: int, size: int, source_pos: Tuple[int, int], 
+
+    def generate_stage_environment(self, stage: int, size: int, source_pos: Tuple[int, int],
                                  seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement d'obstacles adapté à l'étape courante.
-        
+
         Args:
             stage: Numéro d'étape (1, 2, ou 3)
             size: Taille de la grille
             source_pos: Position de la source (i, j)
             seed: Graine pour la reproductibilité
-            
+
         Returns:
             Masque des obstacles [H, W]
         """
         if stage not in self.stage_configs:
             raise ValueError(f"Étape {stage} non supportée. Étapes valides: {list(self.stage_configs.keys())}")
-        
+
         config = self.stage_configs[stage]
-        
+
         if stage == 1:
             return self._generate_stage_1_environment(size)
         elif stage == 2:
             return self._generate_stage_2_environment(size, source_pos, seed)
         elif stage == 3:
             return self._generate_stage_3_environment(size, source_pos, seed)
-    
+        elif stage == 4:
+            return self._generate_stage_4_environment(size, source_pos, seed)
+
     def _generate_stage_1_environment(self, size: int) -> torch.Tensor:
         """Étape 1: Aucun obstacle - grille vide pour apprentissage de base."""
         return torch.zeros((size, size), dtype=torch.bool, device=self.device)
-    
-    def _generate_stage_2_environment(self, size: int, source_pos: Tuple[int, int], 
+
+    def _generate_stage_2_environment(self, size: int, source_pos: Tuple[int, int],
                                     seed: Optional[int] = None) -> torch.Tensor:
         """Étape 2: Un seul obstacle pour apprentissage du contournement."""
         obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=self.device)
-        
+
         if seed is not None:
             g = torch.Generator(device=self.device)
             g.manual_seed(seed)
         else:
             g = None
-        
+
         # Un seul obstacle de taille aléatoire
-        obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1, 
+        obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1,
                                     (1,), generator=g, device=self.device).item()
-        
+
         # Placement en évitant la source et les bords
         max_pos = size - obstacle_size
         if max_pos <= 1:
             return obstacle_mask  # Grille trop petite
-        
+
         source_i, source_j = source_pos
-        
+
         for attempt in range(100):  # Plus de tentatives pour étape 2
             i = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
             j = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-            
+
             # Vérifier non-chevauchement avec source
             if not (i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size):
                 obstacle_mask[i:i+obstacle_size, j:j+obstacle_size] = True
                 break
-        
+
         return obstacle_mask
-    
-    def _generate_stage_3_environment(self, size: int, source_pos: Tuple[int, int], 
+
+    def _generate_stage_3_environment(self, size: int, source_pos: Tuple[int, int],
                                     seed: Optional[int] = None) -> torch.Tensor:
         """Étape 3: Obstacles multiples pour gestion de la complexité."""
         obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=self.device)
-        
+
         if seed is not None:
             g = torch.Generator(device=self.device)
             g.manual_seed(seed)
         else:
             g = None
-        
+
         config = self.stage_configs[3]
-        n_obstacles = torch.randint(config['min_obstacles'], config['max_obstacles'] + 1, 
+        n_obstacles = torch.randint(config['min_obstacles'], config['max_obstacles'] + 1,
                                   (1,), generator=g, device=self.device).item()
-        
+
         source_i, source_j = source_pos
         placed_obstacles = []
-        
+
         for obstacle_idx in range(n_obstacles):
-            obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1, 
+            obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1,
                                         (1,), generator=g, device=self.device).item()
-            
+
             max_pos = size - obstacle_size
             if max_pos <= 1:
                 continue
-            
+
             for attempt in range(50):
                 i = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
                 j = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-                
+
                 # Vérifications multiples pour étape 3
                 valid_position = True
-                
+
                 # 1. Pas de chevauchement avec source
                 if i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size:
                     valid_position = False
-                
+
                 # 2. Pas de chevauchement avec obstacles existants
                 for obs_i, obs_j, obs_size in placed_obstacles:
-                    if (i < obs_i + obs_size and i + obstacle_size > obs_i and 
+                    if (i < obs_i + obs_size and i + obstacle_size > obs_i and
                         j < obs_j + obs_size and j + obstacle_size > obs_j):
                         valid_position = False
                         break
-                
+
                 if valid_position:
                     obstacle_mask[i:i+obstacle_size, j:j+obstacle_size] = True
                     placed_obstacles.append((i, j, obstacle_size))
                     break
-        
+
         # Validation finale de connectivité
         if not self._validate_connectivity(obstacle_mask, source_pos):
             print("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
             return self._generate_stage_2_environment(size, source_pos, seed)
-        
+
         return obstacle_mask
-    
+
+    def _generate_stage_4_environment(self, size: int, source_pos: Tuple[int, int],
+                                    seed: Optional[int] = None) -> torch.Tensor:
+        """Étape 4: Intensités variables avec obstacles pour gestion avancée."""
+        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=self.device)
+
+        if seed is not None:
+            g = torch.Generator(device=self.device)
+            g.manual_seed(seed)
+        else:
+            g = None
+
+        # Configuration simple pour étape 4
+        config = self.stage_configs[4]
+        n_obstacles = torch.randint(config['min_obstacles'], config['max_obstacles'] + 1,
+                                  (1,), generator=g, device=self.device).item()
+
+        source_i, source_j = source_pos
+        placed_obstacles = []
+
+        for obstacle_idx in range(n_obstacles):
+            obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1,
+                                        (1,), generator=g, device=self.device).item()
+
+            max_pos = size - obstacle_size
+            if max_pos <= 1:
+                continue
+
+            for attempt in range(50):
+                i = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
+                j = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
+
+                # Vérifications multiples pour étape 4
+                valid_position = True
+
+                # 1. Pas de chevauchement avec source
+                if i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size:
+                    valid_position = False
+
+                # 2. Pas de chevauchement avec obstacles existants
+                for obs_i, obs_j, obs_size in placed_obstacles:
+                    if (i < obs_i + obs_size and i + obstacle_size > obs_i and
+                        j < obs_j + obs_size and j + obstacle_size > obs_j):
+                        valid_position = False
+                        break
+
+                if valid_position:
+                    obstacle_mask[i:i+obstacle_size, j:j+obstacle_size] = True
+                    placed_obstacles.append((i, j, obstacle_size))
+                    break
+
+        # Validation finale de connectivité
+        if not self._validate_connectivity(obstacle_mask, source_pos):
+            print("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
+            return self._generate_stage_3_environment(size, source_pos, seed)
+
+        return obstacle_mask
+
     def _validate_connectivity(self, obstacle_mask: torch.Tensor, source_pos: Tuple[int, int]) -> bool:
         """
         Valide qu'un chemin de diffusion reste possible avec les obstacles.
@@ -339,53 +426,53 @@ class ProgressiveObstacleManager:
         """
         H, W = obstacle_mask.shape
         source_i, source_j = source_pos
-        
+
         # Matrice de visite
         visited = torch.zeros_like(obstacle_mask, dtype=torch.bool)
         visited[obstacle_mask] = True  # Les obstacles sont "déjà visités"
-        
+
         # Flood-fill depuis la source
         stack = [(source_i, source_j)]
         visited[source_i, source_j] = True
         accessible_cells = 1
-        
+
         while stack:
             i, j = stack.pop()
-            
+
             # Parcours des 4 voisins
             for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 ni, nj = i + di, j + dj
-                
-                if (0 <= ni < H and 0 <= nj < W and 
+
+                if (0 <= ni < H and 0 <= nj < W and
                     not visited[ni, nj] and not obstacle_mask[ni, nj]):
                     visited[ni, nj] = True
                     stack.append((ni, nj))
                     accessible_cells += 1
-        
+
         # Au moins 50% de la grille doit être accessible pour une bonne diffusion
         total_free_cells = (H * W) - obstacle_mask.sum().item()
         connectivity_ratio = accessible_cells / max(total_free_cells, 1)
-        
+
         return connectivity_ratio >= 0.5
-    
+
     def get_difficulty_metrics(self, stage: int, obstacle_mask: torch.Tensor) -> Dict[str, float]:
         """
         Calcule des métriques de difficulté pour l'environnement généré.
-        
+
         Returns:
             Dictionnaire avec les métriques de complexité
         """
         H, W = obstacle_mask.shape
         total_cells = H * W
         obstacle_cells = obstacle_mask.sum().item()
-        
+
         metrics = {
             'stage': stage,
             'obstacle_ratio': obstacle_cells / total_cells,
             'free_cells': total_cells - obstacle_cells,
             'complexity_score': stage * (obstacle_cells / total_cells)
         }
-        
+
         return metrics
 
 # =============================================================================
@@ -395,38 +482,45 @@ class ProgressiveObstacleManager:
 class DiffusionSimulator:
     """
     Simulateur de diffusion de chaleur adapté pour l'apprentissage modulaire.
-    Utilise le gestionnaire d'obstacles progressifs.
+    Utilise le gestionnaire d'obstacles progressifs et support intensités variables (Version 8__).
     """
-    
+
     def __init__(self, device: str = cfg.DEVICE):
         self.kernel = torch.ones((1, 1, 3, 3), device=device) / 9.0
         self.device = device
         self.obstacle_manager = ProgressiveObstacleManager(device)
-    
-    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
-        """Un pas de diffusion de chaleur avec obstacles."""
+
+    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor,
+             source_intensity: Optional[float] = None) -> torch.Tensor:
+        """Un pas de diffusion de chaleur avec obstacles et support intensité variable."""
         x = grid.unsqueeze(0).unsqueeze(0)
         new_grid = F.conv2d(x, self.kernel, padding=1).squeeze(0).squeeze(0)
-        
+
         # Contraintes
         new_grid[obstacle_mask] = 0.0
-        new_grid[source_mask] = grid[source_mask]
-        
+
+        # MODIFICATION VERSION 8__ : Support intensité variable
+        if source_intensity is not None:
+            new_grid[source_mask] = source_intensity  # Intensité spécifique
+        else:
+            new_grid[source_mask] = grid[source_mask]  # Comportement original
+
         return new_grid
-    
-    def generate_stage_sequence(self, stage: int, n_steps: int, size: int, 
-                              seed: Optional[int] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
+
+    def generate_stage_sequence(self, stage: int, n_steps: int, size: int,
+                              seed: Optional[int] = None, source_intensity: Optional[float] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor, Optional[float]]:
         """
         Génère une séquence adaptée à l'étape d'apprentissage courante.
-        
+
         Args:
-            stage: Étape d'apprentissage (1, 2, ou 3)
+            stage: Étape d'apprentissage (1, 2, 3, ou 4)
             n_steps: Nombre d'étapes de simulation
             size: Taille de la grille
             seed: Graine pour la reproductibilité
-            
+            source_intensity: Intensité spécifique pour étape 4 (None = intensité standard)
+
         Returns:
-            (séquence, masque_source, masque_obstacles)
+            (séquence, masque_source, masque_obstacles, intensité_utilisée)
         """
         # Position aléatoire de la source
         if seed is not None:
@@ -437,28 +531,41 @@ class DiffusionSimulator:
         else:
             i0 = torch.randint(2, size-2, (1,), device=self.device).item()
             j0 = torch.randint(2, size-2, (1,), device=self.device).item()
-        
+
         # Génération d'obstacles selon l'étape
         obstacle_mask = self.obstacle_manager.generate_stage_environment(stage, size, (i0, j0), seed)
-        
+
+        # MODIFICATION VERSION 8__ : Gestion intensité variable pour étape 4
+        if stage == 4 and source_intensity is not None:
+            # Étape 4 : utilise l'intensité spécifiée
+            used_intensity = source_intensity
+        else:
+            # Étapes 1-3 : intensité standard
+            used_intensity = cfg.SOURCE_INTENSITY
+
         # Initialisation
         grid = torch.zeros((size, size), device=self.device)
-        grid[i0, j0] = cfg.SOURCE_INTENSITY
-        
+        grid[i0, j0] = used_intensity  # Utilise l'intensité appropriée
+
         source_mask = torch.zeros_like(grid, dtype=torch.bool)
         source_mask[i0, j0] = True
-        
+
         # S'assurer que la source n'est pas dans un obstacle
         if obstacle_mask[i0, j0]:
             obstacle_mask[i0, j0] = False
-        
-        # Simulation temporelle
+
+        # Simulation temporelle avec intensité appropriée
         sequence = [grid.clone()]
         for _ in range(n_steps):
-            grid = self.step(grid, source_mask, obstacle_mask)
+            if stage == 4:
+                # Étape 4 : passe l'intensité spécifique
+                grid = self.step(grid, source_mask, obstacle_mask, source_intensity)
+            else:
+                # Étapes 1-3 : comportement original
+                grid = self.step(grid, source_mask, obstacle_mask)
             sequence.append(grid.clone())
-        
-        return sequence, source_mask, obstacle_mask
+
+        return sequence, source_mask, obstacle_mask, used_intensity
 
 # Instance globale du simulateur modulaire
 simulator = DiffusionSimulator()
@@ -472,33 +579,33 @@ class ImprovedNCA(nn.Module):
     Neural Cellular Automaton optimisé pour l'apprentissage modulaire.
     Architecture identique à v6 mais avec support étendu pour le curriculum.
     """
-    
-    def __init__(self, input_size: int = 11, hidden_size: int = cfg.HIDDEN_SIZE, 
+
+    def __init__(self, input_size: int = 11, hidden_size: int = cfg.HIDDEN_SIZE,
                  n_layers: int = cfg.N_LAYERS):
         super().__init__()
-        
+
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.n_layers = n_layers
-        
+
         # Architecture profonde avec normalisation
         layers = []
         current_size = input_size
-        
+
         for i in range(n_layers):
             layers.append(nn.Linear(current_size, hidden_size))
             layers.append(nn.BatchNorm1d(hidden_size))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(0.1))
             current_size = hidden_size
-        
+
         # Couche de sortie stabilisée
         layers.append(nn.Linear(hidden_size, 1))
         layers.append(nn.Tanh())
-        
+
         self.network = nn.Sequential(*layers)
         self.delta_scale = 0.1
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass avec scaling des deltas."""
         delta = self.network(x)
@@ -511,89 +618,101 @@ class ImprovedNCA(nn.Module):
 class OptimizedNCAUpdater:
     """
     Updater optimisé avec extraction vectorisée des patches.
-    Identique à v6 pour maintenir les performances.
+    VERSION 8__ : Support des intensités variables pour l'étape 4.
     """
-    
+
     def __init__(self, model: ImprovedNCA, device: str = cfg.DEVICE):
         self.model = model
         self.device = device
-    
-    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
-        """Application optimisée du NCA."""
+
+    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor,
+             source_intensity: Optional[float] = None) -> torch.Tensor:
+        """Application optimisée du NCA avec support intensité variable."""
         H, W = grid.shape
-        
+
         # Extraction vectorisée des patches 3x3
         grid_padded = F.pad(grid.unsqueeze(0).unsqueeze(0), (1, 1, 1, 1), mode='replicate')
         patches = F.unfold(grid_padded, kernel_size=3, stride=1)
         patches = patches.squeeze(0).transpose(0, 1)  # [H*W, 9]
-        
+
         # Features additionnelles
         source_flat = source_mask.flatten().float().unsqueeze(1)  # [H*W, 1]
         obstacle_flat = obstacle_mask.flatten().float().unsqueeze(1)  # [H*W, 1]
         full_patches = torch.cat([patches, source_flat, obstacle_flat], dim=1)  # [H*W, 11]
-        
+
         # Application seulement sur positions valides
         valid_mask = ~obstacle_mask.flatten()
-        
+
         if valid_mask.any():
             valid_patches = full_patches[valid_mask]
             deltas = self.model(valid_patches)
-            
+
             new_grid = grid.clone().flatten()
             new_grid[valid_mask] += deltas.squeeze()
             new_grid = torch.clamp(new_grid, 0.0, 1.0).reshape(H, W)
         else:
             new_grid = grid.clone()
-        
-        # Contraintes finales
+
+        # Contraintes finales (VERSION 8__ : Support intensité variable)
         new_grid[obstacle_mask] = 0.0
-        new_grid[source_mask] = grid[source_mask]
-        
+        if source_intensity is not None:
+            # Étape 4 : applique l'intensité spécifique
+            new_grid[source_mask] = source_intensity
+        else:
+            # Étapes 1-3 : comportement original
+            new_grid[source_mask] = grid[source_mask]
+
         return new_grid
 
 class NCAUpdater:
     """
     Updater standard avec boucles Python.
-    Conservé pour compatibilité et debug.
+    VERSION 8__ : Support des intensités variables pour l'étape 4.
     """
-    
+
     def __init__(self, model: ImprovedNCA, device: str = cfg.DEVICE):
         self.model = model
         self.device = device
-    
-    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
-        """Application standard du NCA avec boucles."""
+
+    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor,
+             source_intensity: Optional[float] = None) -> torch.Tensor:
+        """Application standard du NCA avec support intensité variable."""
         H, W = grid.shape
         new_grid = grid.clone()
-        
+
         patches = []
         positions = []
-        
+
         for i in range(1, H-1):
             for j in range(1, W-1):
                 if obstacle_mask[i, j]:
                     continue
-                
+
                 patch = grid[i-1:i+2, j-1:j+2].reshape(-1)  # 9 éléments
                 is_source = source_mask[i, j].float()
                 is_obstacle = obstacle_mask[i, j].float()
                 full_patch = torch.cat([patch, is_source.unsqueeze(0), is_obstacle.unsqueeze(0)])
-                
+
                 patches.append(full_patch)
                 positions.append((i, j))
-        
+
         if patches:
             patches_tensor = torch.stack(patches)
             deltas = self.model(patches_tensor)
-            
+
             for idx, (i, j) in enumerate(positions):
                 new_value = grid[i, j] + deltas[idx].squeeze()
                 new_grid[i, j] = torch.clamp(new_value, 0.0, 1.0)
-        
-        # Contraintes
+
+        # Contraintes (VERSION 8__ : Support intensité variable)
         new_grid[obstacle_mask] = 0.0
-        new_grid[source_mask] = grid[source_mask]
-        
+        if source_intensity is not None:
+            # Étape 4 : applique l'intensité spécifique
+            new_grid[source_mask] = source_intensity
+        else:
+            # Étapes 1-3 : comportement original
+            new_grid[source_mask] = grid[source_mask]
+
         return new_grid
 
 # =============================================================================
@@ -614,7 +733,7 @@ class CurriculumScheduler:
 
     def should_advance_stage(self, current_stage: int, recent_losses: List[float]) -> bool:
         """
-        Détermine s'il faut passer à l'étape suivante.
+        Détermine s'il faut passer à l'étape suivante avec une logique plus stricte.
 
         Args:
             current_stage: Étape courante
@@ -626,24 +745,37 @@ class CurriculumScheduler:
         if not recent_losses or current_stage >= 3:
             return False
 
-        # Convergence: moyenne des pertes récentes
-        avg_recent_loss = np.mean(recent_losses[-5:])  # 5 dernières époques
+        # LOGIQUE AMÉLIORÉE : Plus stricte pour éviter les fausses convergences
+
+        # 1. Convergence: moyenne des pertes récentes (étendue à 10 époques)
+        if len(recent_losses) < 10:
+            return False  # Pas assez d'époques pour juger
+
+        avg_recent_loss = np.mean(recent_losses[-10:])  # 10 dernières époques (était 5)
         threshold = self.thresholds.get(current_stage, 0.05)
 
-        # Critère principal: convergence atteinte
+        # 2. Critère principal: convergence atteinte ET stable
         converged = avg_recent_loss < threshold
 
-        # Critère secondaire: stagnation (pas d'amélioration)
-        if len(recent_losses) >= 2:
-            improvement = recent_losses[-2] - recent_losses[-1]
-            if improvement < 0.001:  # Amélioration négligeable
+        # 3. Critère de stabilité: les 5 dernières pertes doivent être proches
+        if len(recent_losses) >= 5:
+            last_5_losses = recent_losses[-5:]
+            stability = np.std(last_5_losses) < 0.001  # Variance faible = stabilité
+        else:
+            stability = False
+
+        # 4. Critère secondaire renforcé: stagnation prolongée
+        if len(recent_losses) >= 3:
+            improvement = recent_losses[-3] - recent_losses[-1]  # Sur 3 époques
+            if improvement < 0.0001:  # Amélioration quasi-nulle (plus strict)
                 self.no_improvement_counts[current_stage] += 1
             else:
                 self.no_improvement_counts[current_stage] = 0
 
-        stagnated = self.no_improvement_counts[current_stage] >= self.patience
+        stagnated = self.no_improvement_counts[current_stage] >= self.patience * 2  # Double patience
 
-        return converged or stagnated
+        # DÉCISION : Convergence ET stabilité OU stagnation prolongée
+        return (converged and stability) or stagnated
 
     def adjust_learning_rate(self, optimizer, stage: int, epoch_in_stage: int):
         """Ajuste le learning rate selon l'étape et la progression."""
@@ -668,7 +800,8 @@ class CurriculumScheduler:
         weights = {
             1: {'mse': 1.0, 'convergence': 2.0, 'stability': 1.0},
             2: {'mse': 1.0, 'convergence': 1.5, 'stability': 1.5, 'adaptation': 1.0},
-            3: {'mse': 1.0, 'convergence': 1.0, 'stability': 2.0, 'robustness': 1.5}
+            3: {'mse': 1.0, 'convergence': 1.0, 'stability': 2.0, 'robustness': 1.5},
+            4: {'mse': 1.0, 'convergence': 1.2, 'stability': 2.5, 'robustness': 2.0}  # NOUVEAU
         }
         return weights.get(stage, weights[1])
 
@@ -702,7 +835,8 @@ class OptimizedSequenceCache:
             if i % 50 == 0:
                 print(f"   Étape {stage}: {i}/{cache_size}")
 
-            target_seq, source_mask, obstacle_mask = self.simulator.generate_stage_sequence(
+            # CORRECTION : Gérer le tuple de retour avec 4 éléments
+            target_seq, source_mask, obstacle_mask, _ = self.simulator.generate_stage_sequence(
                 stage=stage,
                 n_steps=cfg.NCA_STEPS,
                 size=cfg.GRID_SIZE
@@ -753,7 +887,7 @@ class OptimizedSequenceCache:
 class ModularTrainer:
     """
     Système d'entraînement modulaire progressif.
-    Gère l'apprentissage par étapes avec transitions automatiques.
+    Gère l'apprentissage par étapes avec transitions automatiques et intensités variables (Version 8__).
     """
 
     def __init__(self, model: ImprovedNCA, device: str = cfg.DEVICE):
@@ -785,15 +919,18 @@ class ModularTrainer:
         else:
             self.use_cache = False
 
-        # État d'entraînement
+        # VERSION 8__ : Gestionnaire d'intensités pour étape 4
+        self.intensity_manager = SimulationIntensityManager(device)
+
+        # État d'entraînement (MODIFIÉ pour inclure étape 4)
         self.current_stage = 1
-        self.stage_histories = {stage: {'losses': [], 'epochs': [], 'lr': []} for stage in [1, 2, 3]}
+        self.stage_histories = {stage: {'losses': [], 'epochs': [], 'lr': []} for stage in [1, 2, 3, 4]}
         self.global_history = {'losses': [], 'stages': [], 'epochs': []}
         self.stage_start_epochs = {}
         self.total_epochs_trained = 0
 
     def train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor,
-                   obstacle_mask: torch.Tensor, stage: int) -> float:
+                   obstacle_mask: torch.Tensor, stage: int, source_intensity: Optional[float] = None) -> float:
         """
         Un pas d'entraînement adapté à l'étape courante.
 
@@ -802,22 +939,31 @@ class ModularTrainer:
             source_mask: Masque des sources
             obstacle_mask: Masque des obstacles
             stage: Étape courante d'entraînement
+            source_intensity: Intensité spécifique pour étape 4 (VERSION 8__)
 
         Returns:
             Perte pour ce pas
         """
         self.optimizer.zero_grad()
 
-        # Initialisation
+        # Initialisation avec intensité appropriée (VERSION 8__)
         grid_pred = torch.zeros_like(target_sequence[0])
-        grid_pred[source_mask] = cfg.SOURCE_INTENSITY
+        if stage == 4 and source_intensity is not None:
+            grid_pred[source_mask] = source_intensity  # Intensité variable
+        else:
+            grid_pred[source_mask] = cfg.SOURCE_INTENSITY  # Intensité standard
 
         total_loss = torch.tensor(0.0, device=self.device)
 
         # Déroulement temporel
         for t_step in range(cfg.NCA_STEPS):
             target = target_sequence[t_step + 1]
-            grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask)
+
+            # VERSION 8__ : Utilise l'updater avec intensité appropriée
+            if stage == 4 and source_intensity is not None:
+                grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask, source_intensity)
+            else:
+                grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask)
 
             # Perte pondérée selon l'étape
             step_loss = self.loss_fn(grid_pred, target)
@@ -836,17 +982,165 @@ class ModularTrainer:
         self.optimizer.step()
         return avg_loss.item()
 
-    def train_stage(self, stage: int, max_epochs: int) -> Dict[str, Any]:
+    def train_stage_4(self, max_epochs: int) -> Dict[str, Any]:
         """
-        Entraînement complet d'une étape spécifique.
+        VERSION 8__ : Entraînement spécialisé pour l'étape 4 avec intensités variables.
 
         Args:
-            stage: Numéro d'étape (1, 2, ou 3)
             max_epochs: Nombre maximum d'époques pour cette étape
 
         Returns:
             Dictionnaire avec les métriques de l'étape
         """
+        print(f"\n🎯 === ÉTAPE 4 - INTENSITÉS VARIABLES - DÉBUT ===")
+        print(f"📋 Apprentissage avec intensités variables [0.0, 1.0]")
+        print(f"⏱️  Maximum {max_epochs} époques")
+
+        stage = 4
+        self.current_stage = stage
+        self.stage_start_epochs[stage] = self.total_epochs_trained
+
+        # Métriques de l'étape
+        stage_losses = []
+        intensity_stats_history = []
+        epoch_in_stage = 0
+        early_stop = False
+
+        # Boucle d'entraînement de l'étape 4
+        for epoch_in_stage in range(max_epochs):
+            epoch_losses = []
+            epoch_intensities = []
+            current_intensity = 0.0  # CORRECTION : Initialisation par défaut
+            intensity_stats = {'mean': 0.0}  # CORRECTION : Initialisation par défaut
+
+            # Ajustement du learning rate si curriculum activé
+            if self.curriculum:
+                # Adaptation pour étape 4
+                base_lr = cfg.LEARNING_RATE
+                stage_lr = base_lr * 0.4  # LR réduit pour étape 4
+                cos_factor = 0.5 * (1 + np.cos(np.pi * epoch_in_stage / max_epochs))
+                final_lr = stage_lr * (0.1 + 0.9 * cos_factor)
+
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = final_lr
+
+            # Progression dans l'étape 4 pour curriculum d'intensité
+            epoch_progress = epoch_in_stage / max(max_epochs - 1, 1)
+
+            # Entraînement par batch avec intensités variables
+            for batch_idx in range(cfg.BATCH_SIZE):
+                # VERSION 8__ : Échantillonne intensité pour cette simulation
+                current_intensity = self.intensity_manager.sample_simulation_intensity(epoch_progress)
+                epoch_intensities.append(current_intensity)
+
+                # Génère séquence avec intensité fixe pour cette simulation
+                target_seq, source_mask, obstacle_mask, used_intensity = simulator.generate_stage_sequence(
+                    stage=4,
+                    n_steps=cfg.NCA_STEPS,
+                    size=cfg.GRID_SIZE,
+                    source_intensity=current_intensity
+                )
+
+                # Entraîne avec cette intensité fixe
+                loss = self.train_step(target_seq, source_mask, obstacle_mask, stage, current_intensity)
+                epoch_losses.append(loss)
+
+
+
+            # Statistiques de l'époque
+            if epoch_losses:
+                avg_epoch_loss = np.mean(epoch_losses)
+                stage_losses.append(avg_epoch_loss)
+                current_lr = self.optimizer.param_groups[0]['lr']
+
+                # CORRECTION CRITIQUE : Mise à jour des historiques manquantes pour l'étape 4
+                self.stage_histories[stage]['losses'].append(avg_epoch_loss)
+                self.stage_histories[stage]['epochs'].append(epoch_in_stage)
+                self.stage_histories[stage]['lr'].append(current_lr)
+
+                self.global_history['losses'].append(avg_epoch_loss)
+                self.global_history['stages'].append(stage)
+                self.global_history['epochs'].append(self.total_epochs_trained)
+
+                self.total_epochs_trained += 1  # CRITIQUE : Incrémentation manquante
+
+                # Statistiques des intensités de cette époque
+                if epoch_intensities:
+                    intensity_stats = {
+                        'mean': np.mean(epoch_intensities),
+                        'std': np.std(epoch_intensities),
+                        'min': np.min(epoch_intensities),
+                        'max': np.max(epoch_intensities),
+                        'range': [self.intensity_manager.get_progressive_range(epoch_progress)]
+                    }
+                    intensity_stats_history.append(intensity_stats)
+
+                # Affichage périodique avec statistiques d'intensité
+                if epoch_in_stage % 10 == 0 or epoch_in_stage == max_epochs - 1:
+                    intensity_range = self.intensity_manager.get_progressive_range(epoch_progress)
+                    print(f"  Époque {epoch_in_stage:3d}/{max_epochs-1} | "
+                          f"Loss: {avg_epoch_loss:.6f} | "
+                          f"LR: {current_lr:.2e} | "
+                          f"Intensités: [{intensity_range[0]:.2f}, {intensity_range[1]:.2f}] | "
+                          f"Moy: {intensity_stats['mean']:.3f}")
+                    print(f"    📊 Historique global: {len(self.global_history['losses'])} entrées")
+
+                # Vérification de convergence adaptée à l'étape 4
+                if (epoch_in_stage >= 15):  # Minimum 15 époques pour étape 4
+                    threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.025)
+                    if avg_epoch_loss < threshold:
+                        print(f"🎯 Convergence atteinte à l'époque {epoch_in_stage}")
+                        print(f"   Seuil: {threshold:.3f}, Loss: {avg_epoch_loss:.6f}")
+                        early_stop = True
+                        break
+            else:
+                print(f"⚠️ Époque {epoch_in_stage}: Aucune perte valide calculée")
+
+        # Nettoyage de l'historique des intensités pour économiser la mémoire
+        self.intensity_manager.clear_history()
+
+        # Résumé de l'étape avec statistiques d'intensité
+        final_loss = stage_losses[-1] if stage_losses else float('inf')
+        convergence_met = final_loss < cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.025)
+
+        # Statistiques finales des intensités
+        global_intensity_stats = self.intensity_manager.get_intensity_statistics()
+
+        stage_metrics = {
+            'stage': stage,
+            'epochs_trained': epoch_in_stage + 1,
+            'final_loss': final_loss,
+            'convergence_met': convergence_met,
+            'early_stopped': early_stop,
+            'loss_history': stage_losses,
+            'intensity_stats_history': intensity_stats_history,  # VERSION 8__
+            'global_intensity_stats': global_intensity_stats     # VERSION 8__
+        }
+
+        print(f"✅ === ÉTAPE 4 - TERMINÉE ===")
+        print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
+        print(f"📉 Perte finale: {final_loss:.6f}")
+        print(f"🎯 Convergence: {'✅ OUI' if convergence_met else '❌ NON'}")
+        print(f"⚡ Arrêt précoce: {'✅ OUI' if early_stop else '❌ NON'}")
+        print(f"🔢 Intensités utilisées: {global_intensity_stats['count']} "
+              f"(moy: {global_intensity_stats['mean']:.3f}, "
+              f"plage: [{global_intensity_stats['min']:.3f}, {global_intensity_stats['max']:.3f}])")
+
+        # Sauvegarde du checkpoint d'étape
+        if cfg.SAVE_STAGE_CHECKPOINTS:
+            self.save_stage_checkpoint(stage, stage_metrics)
+
+        return stage_metrics
+
+    def train_stage(self, stage: int, max_epochs: int) -> Dict[str, Any]:
+        """
+        Entraînement complet d'une étape spécifique (VERSION 8__ : délègue étape 4).
+        """
+        if stage == 4:
+            # VERSION 8__ : Étape 4 utilise la méthode spécialisée
+            return self.train_stage_4(max_epochs)
+
+        # Étapes 1-3 : comportement original
         print(f"\n🎯 === ÉTAPE {stage} - DÉBUT ===")
         stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage]
         print(f"📋 {stage_name}")
@@ -856,7 +1150,7 @@ class ModularTrainer:
         self.stage_start_epochs[stage] = self.total_epochs_trained
 
         # Initialisation du cache pour cette étape
-        if self.use_cache:
+        if self.use_cache and stage <= 3:  # Cache seulement pour étapes 1-3
             self.sequence_cache.initialize_stage_cache(stage)
 
         # Métriques de l'étape
@@ -885,7 +1179,7 @@ class ModularTrainer:
                     source_mask = seq_data['source_mask']
                     obstacle_mask = seq_data['obstacle_mask']
                 else:
-                    target_seq, source_mask, obstacle_mask = simulator.generate_stage_sequence(
+                    target_seq, source_mask, obstacle_mask, _ = simulator.generate_stage_sequence(
                         stage=stage, n_steps=cfg.NCA_STEPS, size=cfg.GRID_SIZE
                     )
 
@@ -955,7 +1249,7 @@ class ModularTrainer:
 
     def train_full_curriculum(self) -> Dict[str, Any]:
         """
-        Entraînement complet du curriculum en 3 étapes.
+        Entraînement complet du curriculum en 4 étapes.
 
         Returns:
             Métriques complètes de l'entraînement modulaire
@@ -963,13 +1257,13 @@ class ModularTrainer:
         print(f"\n🚀 === DÉBUT ENTRAÎNEMENT MODULAIRE ===")
         print(f"🎯 Seed: {cfg.SEED}")
         print(f"📊 Époques totales prévues: {cfg.TOTAL_EPOCHS}")
-        print(f"🔄 Étapes: {cfg.STAGE_1_EPOCHS} + {cfg.STAGE_2_EPOCHS} + {cfg.STAGE_3_EPOCHS}")
+        print(f"🔄 Étapes: {cfg.STAGE_1_EPOCHS} + {cfg.STAGE_2_EPOCHS} + {cfg.STAGE_3_EPOCHS} + {cfg.STAGE_4_EPOCHS}")
         print(f"🧠 Curriculum: {'✅ Activé' if cfg.ENABLE_CURRICULUM else '❌ Désactivé'}")
 
         start_time = time.time()
         self.model.train()
 
-        # Entraînement séquentiel des 3 étapes
+        # Entraînement séquentiel des 4 étapes
         all_stage_metrics = {}
 
         # ÉTAPE 1: Sans obstacles
@@ -984,6 +1278,10 @@ class ModularTrainer:
         stage_3_metrics = self.train_stage(3, cfg.STAGE_3_EPOCHS)
         all_stage_metrics[3] = stage_3_metrics
 
+        # ÉTAPE 4: Intensités variables
+        stage_4_metrics = self.train_stage(4, cfg.STAGE_4_EPOCHS)
+        all_stage_metrics[4] = stage_4_metrics
+
         # Métriques globales
         total_time = time.time() - start_time
         total_epochs_actual = sum(metrics['epochs_trained'] for metrics in all_stage_metrics.values())
@@ -994,7 +1292,7 @@ class ModularTrainer:
             'total_time_seconds': total_time,
             'total_time_formatted': f"{total_time/60:.1f} min",
             'stage_metrics': all_stage_metrics,
-            'final_loss': stage_3_metrics['final_loss'],
+            'final_loss': stage_4_metrics['final_loss'],
             'all_stages_converged': all(m['convergence_met'] for m in all_stage_metrics.values()),
             'global_history': self.global_history,
             'stage_histories': self.stage_histories,
@@ -1085,11 +1383,21 @@ class ProgressiveVisualizer:
         torch.manual_seed(vis_seed)
         np.random.seed(vis_seed)
 
-        target_seq, source_mask, obstacle_mask = simulator.generate_stage_sequence(
+        # Pour l'étape 4, échantillonner une intensité variable pour la visualisation
+        source_intensity = None
+        if stage == 4:
+            # Utilise une intensité moyenne pour la visualisation (progression à 0.5)
+            intensity_manager = SimulationIntensityManager(cfg.DEVICE)
+            source_intensity = intensity_manager.sample_simulation_intensity(0.5)  # Milieu de l'étape 4
+            source_intensity = 0.2
+
+        # Gérer le tuple de retour avec 4 éléments et récupérer l'intensité utilisée
+        target_seq, source_mask, obstacle_mask, used_intensity = simulator.generate_stage_sequence(
             stage=stage,
             n_steps=cfg.POSTVIS_STEPS,
             size=cfg.GRID_SIZE,
-            seed=vis_seed
+            seed=vis_seed,
+            source_intensity=source_intensity
         )
 
         # Prédiction du modèle
@@ -1099,12 +1407,13 @@ class ProgressiveVisualizer:
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
         nca_sequence = []
         grid_pred = torch.zeros_like(target_seq[0])
-        grid_pred[source_mask] = cfg.SOURCE_INTENSITY
+        grid_pred[source_mask] = used_intensity  # Utilise l'intensité réelle
         nca_sequence.append(grid_pred.clone())
 
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
             for _ in range(cfg.POSTVIS_STEPS):
-                grid_pred = updater.step(grid_pred, source_mask, obstacle_mask)
+                # Utilise toujours l'intensité appropriée pour chaque étape
+                grid_pred = updater.step(grid_pred, source_mask, obstacle_mask, used_intensity if stage == 4 else None)
                 nca_sequence.append(grid_pred.clone())
 
         # Création des visualisations avec .detach() pour sécurité
@@ -1114,7 +1423,8 @@ class ProgressiveVisualizer:
             'nca_sequence': [t.detach().cpu().numpy() for t in nca_sequence],
             'source_mask': source_mask.detach().cpu().numpy(),
             'obstacle_mask': obstacle_mask.detach().cpu().numpy(),
-            'vis_seed': vis_seed
+            'vis_seed': vis_seed,
+            'source_intensity': used_intensity  # Intensité réelle utilisée pour toutes les étapes
         }
 
         # Sauvegarde des animations
@@ -1136,7 +1446,8 @@ class ProgressiveVisualizer:
             vis_data['nca_sequence'],
             vis_data['obstacle_mask'],
             stage_dir / f"animation_comparaison_étape_{stage}.gif",
-            f"Étape {stage} - Comparaison Cible vs NCA"
+            f"Étape {stage} - Comparaison Cible vs NCA",
+            vis_data['source_intensity']  # AJOUT : intensité pour le titre
         )
 
         # Animation NCA seule
@@ -1144,7 +1455,8 @@ class ProgressiveVisualizer:
             vis_data['nca_sequence'],
             vis_data['obstacle_mask'],
             stage_dir / f"animation_nca_étape_{stage}.gif",
-            f"Étape {stage} - Prédiction NCA"
+            f"Étape {stage} - Prédiction NCA",
+            vis_data['source_intensity']  # AJOUT : intensité pour le titre
         )
 
         print(f"✅ Animations étape {stage} sauvegardées dans {stage_dir}")
@@ -1183,7 +1495,7 @@ class ProgressiveVisualizer:
         print(f"✅ Graphique de convergence étape {stage} sauvegardé: {convergence_path}")
 
     def _save_comparison_gif(self, target_seq: List[np.ndarray], nca_seq: List[np.ndarray],
-                            obstacle_mask: np.ndarray, filepath: Path, title: str):
+                            obstacle_mask: np.ndarray, filepath: Path, title: str, source_intensity: float = 1.0):
         """Sauvegarde un GIF de comparaison côte à côte."""
         import matplotlib.animation as animation
 
@@ -1196,14 +1508,14 @@ class ProgressiveVisualizer:
             # Cible
             im1 = ax1.imshow(target_seq[frame], cmap='hot', vmin=0, vmax=1)
             ax1.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            ax1.set_title(f'Cible - t={frame}')
+            ax1.set_title(f'Cible - t={frame} (I={source_intensity:.3f})')
             ax1.set_xticks([])
             ax1.set_yticks([])
 
             # NCA
             im2 = ax2.imshow(nca_seq[frame], cmap='hot', vmin=0, vmax=1)
             ax2.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            ax2.set_title(f'NCA - t={frame}')
+            ax2.set_title(f'NCA - t={frame} (I={source_intensity:.3f})')
             ax2.set_xticks([])
             ax2.set_yticks([])
 
@@ -1215,7 +1527,7 @@ class ProgressiveVisualizer:
         plt.close()
 
     def _save_single_gif(self, sequence: List[np.ndarray], obstacle_mask: np.ndarray,
-                        filepath: Path, title: str):
+                        filepath: Path, title: str, source_intensity: float = 1.0):
         """Sauvegarde un GIF d'une séquence unique."""
         import matplotlib.animation as animation
 
@@ -1225,7 +1537,7 @@ class ProgressiveVisualizer:
             ax.clear()
             im = ax.imshow(sequence[frame], cmap='hot', vmin=0, vmax=1)
             ax.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            ax.set_title(f'{title} - t={frame}')
+            ax.set_title(f'{title} - t={frame} (I={source_intensity:.3f})')
             ax.set_xticks([])
             ax.set_yticks([])
             return [im]
@@ -1258,9 +1570,9 @@ class ProgressiveVisualizer:
         stages = metrics['global_history']['stages']
         epochs = metrics['global_history']['epochs']
 
-        stage_colors = {1: 'green', 2: 'orange', 3: 'red'}
+        stage_colors = {1: 'green', 2: 'orange', 3: 'red', 4: 'purple'}
 
-        for stage in [1, 2, 3]:
+        for stage in [1, 2, 3, 4]:
             stage_indices = [i for i, s in enumerate(stages) if s == stage]
             stage_losses = [losses[i] for i in stage_indices]
             stage_epochs = [epochs[i] for i in stage_indices]
@@ -1272,7 +1584,7 @@ class ProgressiveVisualizer:
                         linewidth=2)
 
         # Seuils de convergence
-        for stage in [1, 2, 3]:
+        for stage in [1, 2, 3, 4]:
             threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
             ax1.axhline(y=threshold, color=stage_colors[stage],
                        linestyle='--', alpha=0.7,
@@ -1286,7 +1598,7 @@ class ProgressiveVisualizer:
         ax1.set_yscale('log')
 
         # Learning rate par étape
-        for stage in [1, 2, 3]:
+        for stage in [1, 2, 3, 4]:
             stage_history = metrics['stage_histories'][stage]
             if stage_history['lr']:
                 stage_epochs_local = [metrics['stage_start_epochs'].get(stage, 0) + e
@@ -1312,9 +1624,9 @@ class ProgressiveVisualizer:
         """Graphique de comparaison entre étapes."""
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
 
-        stages = [1, 2, 3]
-        stage_names = ["Sans obstacles", "Un obstacle", "Obstacles multiples"]
-        stage_colors = ['green', 'orange', 'red']
+        stages = [1, 2, 3, 4]
+        stage_names = ["Sans obstacles", "Un obstacle", "Obstacles multiples", "Intensités variables"]
+        stage_colors = ['green', 'orange', 'red', 'purple']
 
         # Pertes finales par étape
         final_losses = [metrics['stage_metrics'][s]['final_loss'] for s in stages]
@@ -1332,7 +1644,7 @@ class ProgressiveVisualizer:
 
         # Époques utilisées par étape
         epochs_used = [metrics['stage_metrics'][s]['epochs_trained'] for s in stages]
-        epochs_planned = [cfg.STAGE_1_EPOCHS, cfg.STAGE_2_EPOCHS, cfg.STAGE_3_EPOCHS]
+        epochs_planned = [cfg.STAGE_1_EPOCHS, cfg.STAGE_2_EPOCHS, cfg.STAGE_3_EPOCHS, cfg.STAGE_4_EPOCHS]
 
         x = np.arange(len(stages))
         width = 0.35
@@ -1382,7 +1694,7 @@ class ProgressiveVisualizer:
 
     def _plot_performance_metrics(self, metrics: Dict[str, Any]):
         """Graphique des métriques de performance globales."""
-        fig, ax = plt.subplots(figsize=(12, 8))
+        fig, ax = plt.subplots(figsize=(12,  8))
 
         # Résumé textuel des performances
         total_time = metrics['total_time_seconds']
@@ -1402,9 +1714,9 @@ class ProgressiveVisualizer:
 
 🏆 PERFORMANCE PAR ÉTAPE:"""
 
-        for stage in [1, 2, 3]:
+        for stage in [1, 2, 3, 4]:
             stage_data = metrics['stage_metrics'][stage]
-            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage]
+            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples", 4: "Intensités variables"}[stage]
 
             summary_text += f"""
    • Étape {stage} ({stage_name}):
@@ -1443,6 +1755,109 @@ class ProgressiveVisualizer:
         plt.close()
 
 # =============================================================================
+# Gestionnaire d'intensités variables (NOUVEAU pour Version 8__)
+# =============================================================================
+
+class SimulationIntensityManager:
+    """
+    Gestionnaire des intensités variables pour l'étape 4.
+    Échantillonne et gère les intensités selon un curriculum progressif.
+    """
+
+    def __init__(self, device: str = cfg.DEVICE):
+        self.device = device
+        self.intensity_history = []
+
+    def sample_simulation_intensity(self, epoch_progress: float) -> float:
+        """
+        Échantillonne une intensité selon l'avancement de l'entraînement.
+
+        Args:
+            epoch_progress: Progression dans l'étape 4 (0.0 à 1.0)
+
+        Returns:
+            Intensité échantillonnée pour cette simulation
+        """
+        intensity_range = self.get_progressive_range(epoch_progress)
+
+        # Échantillonnage uniforme dans la plage progressive
+        min_intensity, max_intensity = intensity_range
+        intensity = min_intensity + (max_intensity - min_intensity) * torch.rand(1, device=self.device).item()
+
+        # Validation et ajustement si nécessaire
+        intensity = self.validate_intensity(intensity)
+
+        # Historique pour statistics et debugging
+        self.intensity_history.append(intensity)
+
+        return intensity
+
+    def get_progressive_range(self, epoch_progress: float) -> Tuple[float, float]:
+        """
+        Calcule la plage d'intensité progressive selon l'avancement.
+
+        Args:
+            epoch_progress: Progression (0.0 = début étape 4, 1.0 = fin étape 4)
+
+        Returns:
+            (min_intensity, max_intensity) pour cette progression
+        """
+        initial_range = cfg.STAGE_4_SOURCE_CONFIG['initial_range']  # [0.5, 1.0]
+        final_range = cfg.STAGE_4_SOURCE_CONFIG['final_range']      # [0.0, 1.0]
+
+        # Interpolation linéaire entre plages initiale et finale
+        min_intensity = initial_range[0] + epoch_progress * (final_range[0] - initial_range[0])
+        max_intensity = initial_range[1] + epoch_progress * (final_range[1] - initial_range[1])
+
+        return (min_intensity, max_intensity)
+
+    def validate_intensity(self, intensity: float) -> float:
+        """
+        Valide et ajuste une intensité si nécessaire.
+
+        Args:
+            intensity: Intensité à valider
+
+        Returns:
+            Intensité validée et ajustée
+        """
+        # Assure que l'intensité est dans [0.0, 1.0]
+        intensity = max(0.0, min(1.0, intensity))
+
+        # Évite les intensités quasi-nulles problématiques sauf si exactement 0.0
+        if 0.0 < intensity < 0.001:
+            intensity = 0.001
+
+        return intensity
+
+    def get_intensity_statistics(self) -> Dict[str, float]:
+        """
+        Retourne les statistiques des intensités utilisées.
+
+        Returns:
+            Dictionnaire avec les statistiques
+        """
+        if not self.intensity_history:
+            return {'count': 0, 'mean': 0.0, 'std': 0.0, 'min': 0.0, 'max': 0.0}
+
+        intensities = np.array(self.intensity_history)
+
+        return {
+            'count': len(intensities),
+            'mean': float(np.mean(intensities)),
+            'std': float(np.std(intensities)),
+            'min': float(np.min(intensities)),
+            'max': float(np.max(intensities)),
+            'median': float(np.median(intensities))
+        }
+
+    def clear_history(self):
+        """Efface l'historique pour économiser la mémoire."""
+        # Garde seulement les 1000 dernières intensités
+        if len(self.intensity_history) > 1000:
+            self.intensity_history = self.intensity_history[-1000:]
+
+# =============================================================================
 # Fonction principale d'exécution (NOUVEAU)
 # =============================================================================
 
@@ -1479,7 +1894,7 @@ def main():
         visualizer = ProgressiveVisualizer(interactive_mode)
 
         # Visualisation par étape avec le modèle final
-        for stage in [1, 2, 3]:
+        for stage in [1, 2, 3, 4]:
             stage_vis = visualizer.visualize_stage_results(model, stage, args.vis_seed)
 
         # Résumé visuel complet du curriculum
@@ -1497,9 +1912,9 @@ def main():
 
         # Détail par étape
         print(f"\n📋 DÉTAIL PAR ÉTAPE:")
-        for stage in [1, 2, 3]:
+        for stage in [1, 2, 3, 4]:
             stage_data = global_metrics['stage_metrics'][stage]
-            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage]
+            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples", 4: "Intensités variables"}[stage]
             status = "✅ CONVERGÉE" if stage_data['convergence_met'] else "❌ NON CONVERGÉE"
             print(f"   Étape {stage} ({stage_name}): {status} - {stage_data['final_loss']:.6f}")
 
@@ -1509,6 +1924,30 @@ def main():
         print(f"   • Comparaison étapes: stage_comparison.png")
         print(f"   • Résumé performance: performance_summary.png")
         print(f"   • Métriques complètes: complete_metrics.json")
+
+        # VERSION 8__ : Génération de la suite complète de visualisations étendues
+        print(f"\n🎨 Génération de la suite complète de visualisations v8__...")
+
+        # Préparation des métriques d'intensité pour l'étape 4
+        if 'stage_metrics' in global_metrics and 4 in global_metrics['stage_metrics']:
+            stage_4_data = global_metrics['stage_metrics'][4]
+
+            # Extraction des métriques d'intensité si disponibles
+            intensity_metrics = {}
+            if 'intensity_stats_history' in stage_4_data:
+                intensity_metrics['stage_4_metrics'] = {
+                    'intensity_history': trainer.intensity_manager.intensity_history,
+                    'performance_by_intensity': {
+                        'intensities': trainer.intensity_manager.intensity_history,
+                        'losses': stage_4_data.get('loss_history', [])
+                    }
+                }
+
+            # Ajout des métriques d'intensité aux métriques globales
+            global_metrics['intensity_metrics'] = intensity_metrics
+
+        # Appel de la suite de visualisation complète
+        create_complete_visualization_suite(model, global_metrics, simulator, cfg)
 
         return global_metrics
 
@@ -1520,7 +1959,8 @@ def main():
         print(f"   {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
-        return None
+        raise
+
 
 if __name__ == "__main__":
     # Exécution du programme principal
