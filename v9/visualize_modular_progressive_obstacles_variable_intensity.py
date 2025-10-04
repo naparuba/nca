@@ -1,12 +1,9 @@
 import torch
-import torch.nn as nn
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import numpy as np
-from typing import Tuple, List, Optional, Dict, Any
-import os
+from typing import List, Optional, Dict, Any
 from pathlib import Path
-import json
 
 # =============================================================================
 # Système de Visualisation pour NCA Modulaire avec Intensités Variables (v8__)
@@ -840,37 +837,3 @@ def create_complete_visualization_suite(model, global_metrics: Dict[str, Any],
     print("   • Comparaison étapes étendue: stage_comparison_extended.png")
     print("   • Résumé performance étendu: performance_summary_extended.png")
 
-
-# =============================================================================
-# Fonctions utilitaires
-# =============================================================================
-
-def save_visualization_metadata(global_metrics: Dict[str, Any], cfg):
-    """Sauvegarde les métadonnées de visualisation."""
-    metadata = {
-        'version': '8__',
-        'visualization_type': 'modular_progressive_obstacles_variable_intensity',
-        'seed': cfg.SEED,
-        'total_stages': 4,
-        'intensity_support': True,
-        'generation_timestamp': str(np.datetime64('now')),
-        'metrics_summary': {
-            'total_epochs': global_metrics.get('total_epochs_actual', 0),
-            'all_converged': global_metrics.get('all_stages_converged', False),
-            'final_loss': global_metrics.get('final_loss', 0)
-        }
-    }
-    
-    if 'intensity_metrics' in global_metrics:
-        metadata['intensity_statistics'] = global_metrics['intensity_metrics'].get('statistics', {})
-    
-    metadata_path = Path(cfg.OUTPUT_DIR) / "visualization_metadata.json"
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2, default=str)
-    
-    print(f"✅ Métadonnées de visualisation sauvegardées: {metadata_path}")
-
-
-if __name__ == "__main__":
-    print("🎨 Module de visualisation NCA v8__ - Intensités Variables")
-    print("Ce module doit être importé depuis le programme principal.")
