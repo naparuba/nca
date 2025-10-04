@@ -21,7 +21,7 @@ from pathlib import Path
 from stages import ModularStageManager, BaseStage
 
 # Import du module de visualisation v9
-from visualize_modular_progressive_obstacles_variable_intensity import create_complete_visualization_suite
+from stages.visualizers import create_complete_visualization_suite
 
 # =============================================================================
 # Configuration globale simplifiée

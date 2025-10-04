@@ -1,13 +1,14 @@
+"""
+Visualiseur progressif pour l'apprentissage modulaire avec intensités variables.
+Migré depuis visualize_modular_progressive_obstacles_variable_intensity.py
+"""
+
 import torch
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 import numpy as np
 from typing import List, Optional, Dict, Any
 from pathlib import Path
 
-# =============================================================================
-# Système de Visualisation pour NCA Modulaire avec Intensités Variables (v8__)
-# =============================================================================
 
 class ProgressiveVisualizer:
     """
@@ -56,8 +57,8 @@ class ProgressiveVisualizer:
                 used_intensity = cfg.DEFAULT_SOURCE_INTENSITY
 
         # Simulation NCA avec intensité appropriée
-        nca_sequence = self._simulate_nca_with_intensity(model, target_seq[0], 
-                                                       source_mask, obstacle_mask, 
+        nca_sequence = self._simulate_nca_with_intensity(model, target_seq[0],
+                                                       source_mask, obstacle_mask,
                                                        used_intensity, cfg)
         
         # Données de visualisation étendues
@@ -78,14 +79,14 @@ class ProgressiveVisualizer:
         model.train()
         return vis_data
     
-    def _simulate_nca_with_intensity(self, model, initial_grid, source_mask, obstacle_mask, 
+    def _simulate_nca_with_intensity(self, model, initial_grid, source_mask, obstacle_mask,
                                    source_intensity: float, cfg) -> List[torch.Tensor]:
         """
         Simule le NCA avec une intensité spécifique.
         """
         # Import dynamique pour éviter les dépendances circulaires
         try:
-            from . import OptimizedNCAUpdater, NCAUpdater
+            from .. import OptimizedNCAUpdater, NCAUpdater
         except ImportError:
             # Fallback si import relatif échoue
             try:
@@ -144,6 +145,9 @@ class ProgressiveVisualizer:
     
     def _create_stage_animations_with_intensity(self, vis_data: Dict[str, Any], cfg):
         """Crée les animations GIF pour une étape avec affichage d'intensité."""
+        # Import local pour éviter les dépendances circulaires
+        from .intensity_animator import IntensityAwareAnimator
+        
         stage = vis_data['stage']
         intensity = vis_data['source_intensity']
         
@@ -208,7 +212,7 @@ class ProgressiveVisualizer:
         
         # Seuil de convergence adaptatif
         threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
-        ax.axhline(y=threshold, color='r', linestyle='--', 
+        ax.axhline(y=threshold, color='r', linestyle='--',
                   label=f'Seuil convergence étape {stage}')
         
         ax.set_xlabel('Pas de temps')
@@ -225,17 +229,24 @@ class ProgressiveVisualizer:
         print(f"✅ Graphique de convergence étape {stage} (I={intensity:.3f}) sauvegardé: {convergence_path}")
     
     def create_intensity_comparison_grid(self, model, simulator, cfg,
-                                       intensity_samples: List[float] = [0.0, 0.25, 0.5, 0.75, 1.0],
+                                       intensity_samples: Optional[List[float]] = None,
                                        vis_seed: int = 123):
         """
         Crée une grille comparative pour différentes intensités (Étape 4).
         """
+        if intensity_samples is None:
+            intensity_samples = [0.0, 0.25, 0.5, 0.75, 1.0]
+        
         print("🎨 Génération de la grille comparative d'intensités...")
         
         fig, axes = plt.subplots(2, len(intensity_samples), figsize=(4*len(intensity_samples), 8))
         
         if len(intensity_samples) == 1:
             axes = axes.reshape(-1, 1)
+        
+        # Initialisation des variables pour les colorbars
+        im1 = None
+        im2 = None
         
         for i, intensity in enumerate(intensity_samples):
             # Génération avec intensité spécifique
@@ -256,13 +267,14 @@ class ProgressiveVisualizer:
             axes[1, i].set_xticks([])
             axes[1, i].set_yticks([])
         
-        # Ajout des colorbars
-        fig.colorbar(im1, ax=axes[0, :], shrink=0.6, aspect=20)
-        fig.colorbar(im2, ax=axes[1, :], shrink=0.6, aspect=20)
+        # Ajout des colorbars seulement si on a des images
+        if im1 is not None and im2 is not None:
+            fig.colorbar(im1, ax=axes[0, :], shrink=0.6, aspect=20)
+            fig.colorbar(im2, ax=axes[1, :], shrink=0.6, aspect=20)
         
         plt.suptitle('Comparaison d\'Intensités - Étape 4', fontsize=16, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(Path(cfg.OUTPUT_DIR) / "intensity_comparison_grid.png", 
+        plt.savefig(Path(cfg.OUTPUT_DIR) / "intensity_comparison_grid.png",
                    dpi=150, bbox_inches='tight')
         plt.close()
         
@@ -272,6 +284,9 @@ class ProgressiveVisualizer:
         """
         Visualise le curriculum d'intensité de l'étape 4.
         """
+        # Import local pour éviter les dépendances circulaires
+        from .metrics_plotter import VariableIntensityMetricsPlotter
+        
         print("🎨 Génération des graphiques de curriculum d'intensité...")
         
         output_dir = Path(cfg.OUTPUT_DIR)
@@ -288,7 +303,7 @@ class ProgressiveVisualizer:
         if 'convergence_analysis' in stage_4_metrics:
             metrics_plotter.plot_convergence_analysis_by_intensity(
                 stage_4_metrics['convergence_analysis'], output_dir)
-        
+
     def create_curriculum_summary_extended(self, global_metrics: Dict[str, Any], cfg):
         """Crée un résumé visuel complet du curriculum d'apprentissage étendu (v8__)."""
         print("\n🎨 Génération du résumé visuel du curriculum étendu...")
@@ -544,296 +559,3 @@ class ProgressiveVisualizer:
         plt.savefig(Path(cfg.OUTPUT_DIR) / "performance_summary_extended.png",
                    dpi=150, bbox_inches='tight')
         plt.close()
-
-
-class IntensityAwareAnimator:
-    """
-    Générateur d'animations avec affichage d'intensité dans les titres.
-    Spécialisé pour la version 8__ avec intensités variables.
-    """
-    
-    def create_intensity_labeled_gif(self, sequence: List[np.ndarray], 
-                                   obstacle_mask: np.ndarray,
-                                   source_intensity: float,
-                                   filepath: Path, 
-                                   base_title: str):
-        """
-        Crée un GIF avec l'intensité affichée dans le titre.
-        """
-        fig, ax = plt.subplots(figsize=(8, 8))
-        
-        def animate(frame):
-            ax.clear()
-            im = ax.imshow(sequence[frame], cmap='hot', vmin=0, vmax=1)
-            ax.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            
-            # Titre avec intensité
-            title = f'{base_title} (I={source_intensity:.3f}) - t={frame}'
-            ax.set_title(title, fontsize=12, fontweight='bold')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            
-            return [im]
-        
-        ani = animation.FuncAnimation(fig, animate, frames=len(sequence), 
-                                    interval=200, blit=False, repeat=True)
-        ani.save(filepath, writer='pillow', fps=5)
-        plt.close()
-    
-    def create_comparison_with_intensity(self, target_seq: List[np.ndarray], 
-                                       nca_seq: List[np.ndarray],
-                                       obstacle_mask: np.ndarray, 
-                                       source_intensity: float,
-                                       filepath: Path):
-        """
-        Crée une animation de comparaison avec affichage d'intensité.
-        """
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-        
-        def animate(frame):
-            ax1.clear()
-            ax2.clear()
-            
-            # Cible
-            im1 = ax1.imshow(target_seq[frame], cmap='hot', vmin=0, vmax=1)
-            ax1.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            ax1.set_title(f'Cible (I={source_intensity:.3f}) - t={frame}')
-            ax1.set_xticks([])
-            ax1.set_yticks([])
-            
-            # NCA
-            im2 = ax2.imshow(nca_seq[frame], cmap='hot', vmin=0, vmax=1)
-            ax2.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            ax2.set_title(f'NCA (I={source_intensity:.3f}) - t={frame}')
-            ax2.set_xticks([])
-            ax2.set_yticks([])
-            
-            return [im1, im2]
-        
-        n_frames = min(len(target_seq), len(nca_seq))
-        ani = animation.FuncAnimation(fig, animate, frames=n_frames, 
-                                    interval=200, blit=False, repeat=True)
-        ani.save(filepath, writer='pillow', fps=5)
-        plt.close()
-
-
-class VariableIntensityMetricsPlotter:
-    """
-    Générateur de graphiques spécialisés pour les métriques d'intensité variable.
-    """
-    
-    def plot_intensity_distribution(self, intensity_history: List[float], 
-                                  output_dir: Path):
-        """
-        Graphique de distribution des intensités utilisées pendant l'entraînement.
-        """
-        if not intensity_history:
-            print("⚠️ Pas d'historique d'intensité disponible")
-            return
-            
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-        
-        # Histogramme
-        ax1.hist(intensity_history, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-        ax1.set_xlabel('Intensité de Source')
-        ax1.set_ylabel('Fréquence')
-        ax1.set_title('Distribution des Intensités (Étape 4)')
-        ax1.grid(True, alpha=0.3)
-        
-        # Ajout de statistiques
-        mean_intensity = np.mean(intensity_history)
-        std_intensity = np.std(intensity_history)
-        ax1.axvline(mean_intensity, color='red', linestyle='--', 
-                   label=f'Moyenne: {mean_intensity:.3f}')
-        ax1.legend()
-        
-        # Évolution temporelle
-        ax2.plot(intensity_history, 'o-', alpha=0.6, markersize=1)
-        ax2.set_xlabel('Simulation #')
-        ax2.set_ylabel('Intensité')
-        ax2.set_title('Évolution des Intensités au Cours de l\'Entraînement')
-        ax2.grid(True, alpha=0.3)
-        
-        # Ligne de tendance
-        if len(intensity_history) > 1:
-            z = np.polyfit(range(len(intensity_history)), intensity_history, 1)
-            p = np.poly1d(z)
-            ax2.plot(range(len(intensity_history)), p(range(len(intensity_history))), 
-                    "r--", alpha=0.8, label=f'Tendance: {z[0]:.6f}x + {z[1]:.3f}')
-            ax2.legend()
-        
-        plt.tight_layout()
-        plt.savefig(output_dir / "intensity_distribution.png", dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print("✅ Graphique de distribution des intensités généré")
-    
-    def plot_performance_by_intensity_range(self, metrics_by_intensity: Dict[str, List[float]],
-                                          output_dir: Path):
-        """
-        Performance du modèle selon les plages d'intensité.
-        """
-        if 'intensities' not in metrics_by_intensity or 'losses' not in metrics_by_intensity:
-            print("⚠️ Données de performance par intensité manquantes")
-            return
-            
-        # Regroupement par plages d'intensité
-        ranges = {
-            'Très faible\n(0.0-0.2)': [],
-            'Faible\n(0.2-0.4)': [],
-            'Moyenne\n(0.4-0.6)': [],
-            'Forte\n(0.6-0.8)': [],
-            'Très forte\n(0.8-1.0)': []
-        }
-        
-        for intensity, loss in zip(metrics_by_intensity['intensities'], 
-                                 metrics_by_intensity['losses']):
-            if intensity <= 0.2:
-                ranges['Très faible\n(0.0-0.2)'].append(loss)
-            elif intensity <= 0.4:
-                ranges['Faible\n(0.2-0.4)'].append(loss)
-            elif intensity <= 0.6:
-                ranges['Moyenne\n(0.4-0.6)'].append(loss)
-            elif intensity <= 0.8:
-                ranges['Forte\n(0.6-0.8)'].append(loss)
-            else:
-                ranges['Très forte\n(0.8-1.0)'].append(loss)
-        
-        # Graphique en boîtes
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        data_to_plot = [losses for losses in ranges.values() if losses]
-        labels = [label for label, losses in ranges.items() if losses]
-        
-        if data_to_plot:
-            box_plot = ax.boxplot(data_to_plot, labels=labels, patch_artist=True)
-            
-            # Coloration des boîtes
-            colors = ['lightcoral', 'lightsalmon', 'lightblue', 'lightgreen', 'lightsteelblue']
-            for patch, color in zip(box_plot['boxes'], colors[:len(box_plot['boxes'])]):
-                patch.set_facecolor(color)
-            
-            ax.set_ylabel('Perte MSE')
-            ax.set_title('Performance par Plage d\'Intensité (Étape 4)')
-            ax.grid(True, alpha=0.3)
-            ax.set_yscale('log')
-            
-            plt.tight_layout()
-            plt.savefig(output_dir / "performance_by_intensity_range.png", 
-                       dpi=150, bbox_inches='tight')
-            plt.close()
-            
-            print("✅ Graphique de performance par plage d'intensité généré")
-        else:
-            print("⚠️ Pas assez de données pour les plages d'intensité")
-    
-    def plot_convergence_analysis_by_intensity(self, convergence_data: Dict[str, Any],
-                                             output_dir: Path):
-        """
-        Analyse de convergence selon l'intensité.
-        """
-        required_keys = ['intensities', 'convergence_times', 'stability_scores']
-        if not all(key in convergence_data for key in required_keys):
-            print("⚠️ Données de convergence par intensité incomplètes")
-            return
-            
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-        
-        # Temps de convergence vs intensité
-        intensities = convergence_data['intensities']
-        convergence_times = convergence_data['convergence_times']
-        
-        scatter = ax1.scatter(intensities, convergence_times, alpha=0.6, c=intensities, 
-                            cmap='viridis', s=50)
-        ax1.set_xlabel('Intensité de Source')
-        ax1.set_ylabel('Temps de Convergence (époques)')
-        ax1.set_title('Temps de Convergence vs Intensité')
-        ax1.grid(True, alpha=0.3)
-        plt.colorbar(scatter, ax=ax1)
-        
-        # Stabilité vs intensité
-        stability_scores = convergence_data['stability_scores']
-        
-        scatter2 = ax2.scatter(intensities, stability_scores, alpha=0.6, c=intensities,
-                             cmap='plasma', s=50)
-        ax2.set_xlabel('Intensité de Source')
-        ax2.set_ylabel('Score de Stabilité')
-        ax2.set_title('Stabilité vs Intensité')
-        ax2.grid(True, alpha=0.3)
-        plt.colorbar(scatter2, ax=ax2)
-        
-        plt.tight_layout()
-        plt.savefig(output_dir / "convergence_analysis_by_intensity.png", 
-                   dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print("✅ Graphique d'analyse de convergence par intensité généré")
-
-
-def create_complete_visualization_suite(model, global_metrics: Dict[str, Any], 
-                                      simulator, cfg):
-    """
-    Crée la suite complète de visualisations pour la version 8__.
-    
-    Comprend:
-    - Visualisations par étape (1-4) avec intensités
-    - Comparaisons d'intensités pour l'étape 4
-    - Graphiques de curriculum étendu
-    - Métriques spécialisées intensités variables
-    """
-    print("\n" + "="*80)
-    print("🎨 GÉNÉRATION DE LA SUITE COMPLÈTE DE VISUALISATIONS v8__")
-    print("="*80)
-    
-    # Initialisation des visualiseurs
-    visualizer = ProgressiveVisualizer()
-    
-    # 1. Visualisations par étape (étendues)
-    print("\n🎨 Génération des visualisations par étape...")
-    
-    # Étapes 1-3: intensité standard
-    for stage in [1, 2, 3]:
-        stage_vis = visualizer.visualize_stage_results(model, stage, simulator, cfg)
-
-    # Étape 4: plusieurs intensités
-    stage_4_intensities = [0.0, 0.3, 0.7, 1.0]
-    for intensity in stage_4_intensities:
-        stage_vis = visualizer.visualize_stage_results(model, stage=4, simulator=simulator, cfg=cfg,
-                                                         source_intensity=intensity)
-
-    
-    # 2. Grille comparative d'intensités
-    print("\n🎨 Génération de la grille comparative d'intensités...")
-    visualizer.create_intensity_comparison_grid(model, simulator, cfg)
-
-    
-    # 3. Curriculum d'intensité (nouveau)
-    print("\n🎨 Génération des graphiques de curriculum d'intensité...")
-    if 'stage_4_metrics' in global_metrics:
-        visualizer.visualize_intensity_curriculum(global_metrics['stage_4_metrics'], cfg)
-    else:
-        print("⚠️ Métriques étape 4 non disponibles pour le curriculum d'intensité")
-
-    
-    # 4. Résumé visuel étendu
-    print("\n🎨 Génération du résumé visuel complet étendu...")
-    visualizer.create_curriculum_summary_extended(global_metrics, cfg)
-
-    
-    print("\n" + "="*80)
-    print("✅ SUITE COMPLÈTE DE VISUALISATIONS v8__ GÉNÉRÉE!")
-    print("="*80)
-    
-    # Résumé des fichiers générés
-    output_dir = Path(cfg.OUTPUT_DIR)
-    print(f"\n📁 Fichiers générés dans: {output_dir}")
-    print("📋 Liste des visualisations:")
-    print("   • Animations par étape: stage_X/")
-    print("   • Grille comparative intensités: intensity_comparison_grid.png")
-    print("   • Distribution intensités: intensity_distribution.png") 
-    print("   • Performance par plage: performance_by_intensity_range.png")
-    print("   • Convergence vs intensité: convergence_analysis_by_intensity.png")
-    print("   • Progression curriculum étendu: curriculum_progression_extended.png")
-    print("   • Comparaison étapes étendue: stage_comparison_extended.png")
-    print("   • Résumé performance étendu: performance_summary_extended.png")
-
