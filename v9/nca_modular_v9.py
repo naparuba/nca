@@ -409,11 +409,23 @@ class ModularTrainer:
         self.stage_manager.save_stage_checkpoint(stage_id, model_state, output_dir)
 
     def generate_stage_visualizations(self, vis_seed: int):
-        """Génère les visualisations pour chaque stage."""
+        """Génère les visualisations pour chaque stage en utilisant les visualiseurs spécialisés."""
         print(f"🎨 Génération des visualisations par stage...")
+        
+        # Import des visualiseurs spécialisés
+        try:
+            from stages.visualizers import get_visualizer
+            has_specialized_visualizers = True
+            print(f"  ✓ Visualiseurs spécialisés disponibles")
+        except ImportError:
+            has_specialized_visualizers = False
+            print(f"  ⚠️ Visualiseurs spécialisés non disponibles, utilisation du visualiseur générique")
         
         # Configuration matplotlib
         matplotlib.use('Agg')  # Mode non-interactif pour sauvegarde
+        
+        # Données pour visualisations multi-intensités du Stage 4
+        stage4_intensity_data = {}
         
         for stage_id in self.stage_manager.stage_sequence:
             if stage_id in self.stage_manager.active_stages:
@@ -423,6 +435,9 @@ class ModularTrainer:
                 # Création du répertoire du stage
                 stage_dir = Path(self.config.OUTPUT_DIR) / f"stage_{stage_id}"
                 stage_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Récupération du visualiseur spécialisé si disponible
+                specialized_visualizer = get_visualizer(stage_id) if has_specialized_visualizers else None
                 
                 # Génération de la visualisation principale
                 torch.manual_seed(vis_seed)
@@ -455,14 +470,43 @@ class ModularTrainer:
                         )
                         nca_sequence.append(grid_pred.clone())
                 
-                # Création des visualisations principales
-                self._create_stage_animations(
-                    stage_id, stage_dir, target_seq, nca_sequence,
-                    obstacle_mask, used_intensity, suffix=""
-                )
-                self._create_stage_convergence_plot(
-                    stage_id, stage_dir, target_seq, nca_sequence, vis_seed, suffix=""
-                )
+                # Utilisation du visualiseur spécialisé si disponible
+                if specialized_visualizer:
+                    # Récupération d'informations supplémentaires pour le Stage 4
+                    intensity_history = None
+                    if stage_id == 4 and hasattr(stage, 'intensity_manager'):
+                        try:
+                            intensity_history = stage.intensity_manager.intensity_history
+                        except:
+                            pass
+                    
+                    # Création des visualisations spécialisées
+                    print(f"    🎨 Utilisation du visualiseur spécialisé pour Stage {stage_id}")
+                    specialized_visualizer.create_visualizations(
+                        stage_dir, target_seq, nca_sequence,
+                        obstacle_mask, source_mask, used_intensity,
+                        vis_seed, intensity_history if stage_id == 4 else None
+                    )
+                    
+                    # Stockage des données pour visualisation multi-intensités du Stage 4
+                    if stage_id == 4:
+                        # Stockage des données principales
+                        stage4_intensity_data[used_intensity] = {
+                            'target_sequence': [t.detach().cpu().numpy() for t in target_seq],
+                            'nca_sequence': [t.detach().cpu().numpy() for t in nca_sequence],
+                            'source_mask': source_mask.detach().cpu().numpy(),
+                            'obstacle_mask': obstacle_mask.detach().cpu().numpy(),
+                        }
+                else:
+                    # Utilisation du visualiseur générique
+                    print(f"    🎨 Utilisation du visualiseur générique pour Stage {stage_id}")
+                    self._create_stage_animations(
+                        stage_id, stage_dir, target_seq, nca_sequence,
+                        obstacle_mask, used_intensity, suffix=""
+                    )
+                    self._create_stage_convergence_plot(
+                        stage_id, stage_dir, target_seq, nca_sequence, vis_seed, suffix=""
+                    )
                 
                 # NOUVEAU : Visualisations supplémentaires pour Stage 4
                 if stage_id == 4 and hasattr(stage, 'sample_source_intensity'):
@@ -497,18 +541,57 @@ class ModularTrainer:
                                 )
                                 nca_sequence_fixed.append(grid_pred_fixed.clone())
                         
-                        # Création des visualisations avec suffixe pour l'intensité
-                        intensity_suffix = f"_intensity_{intensity:.2f}".replace(".", "")
-                        self._create_stage_animations(
-                            stage_id, stage_dir, target_seq_fixed, nca_sequence_fixed,
-                            obstacle_mask_fixed, intensity, suffix=intensity_suffix
-                        )
-                        self._create_stage_convergence_plot(
-                            stage_id, stage_dir, target_seq_fixed, nca_sequence_fixed,
-                            vis_seed, suffix=intensity_suffix
-                        )
+                        # Stockage des données pour visualisation comparative
+                        if specialized_visualizer and stage_id == 4:
+                            stage4_intensity_data[intensity] = {
+                                'target_sequence': [t.detach().cpu().numpy() for t in target_seq_fixed],
+                                'nca_sequence': [t.detach().cpu().numpy() for t in nca_sequence_fixed],
+                                'source_mask': source_mask_fixed.detach().cpu().numpy(),
+                                'obstacle_mask': obstacle_mask_fixed.detach().cpu().numpy(),
+                            }
+                        
+                        # Création des visualisations
+                        if specialized_visualizer:
+                            # Utilisation du visualiseur spécialisé
+                            suffix = f"_intensity_{intensity:.2f}".replace(".", "")
+                            specialized_visualizer._create_animations_with_intensity(
+                                stage_dir, target_seq_fixed, nca_sequence_fixed,
+                                obstacle_mask_fixed, intensity, suffix
+                            )
+                            specialized_visualizer._create_convergence_plot_with_intensity(
+                                stage_dir, target_seq_fixed, nca_sequence_fixed,
+                                vis_seed, intensity, threshold=stage.config.convergence_threshold, suffix=suffix
+                            )
+                            specialized_visualizer._create_intensity_influence_plot(
+                                stage_dir, nca_sequence_fixed, intensity
+                            )
+                        else:
+                            # Utilisation du visualiseur générique
+                            intensity_suffix = f"_intensity_{intensity:.2f}".replace(".", "")
+                            self._create_stage_animations(
+                                stage_id, stage_dir, target_seq_fixed, nca_sequence_fixed,
+                                obstacle_mask_fixed, intensity, suffix=intensity_suffix
+                            )
+                            self._create_stage_convergence_plot(
+                                stage_id, stage_dir, target_seq_fixed, nca_sequence_fixed,
+                                vis_seed, suffix=intensity_suffix
+                            )
                 
                 self.model.train()
+                
+                # Création des visualisations comparatives pour Stage 4
+                if stage_id == 4 and specialized_visualizer and len(stage4_intensity_data) > 1:
+                    intensities = sorted(stage4_intensity_data.keys())
+                    vis_data_list = [stage4_intensity_data[i] for i in intensities]
+                    
+                    print(f"    🎨 Création des visualisations comparatives entre intensités...")
+                    specialized_visualizer._create_intensity_comparison_plot(
+                        stage_dir, intensities, vis_data_list, vis_seed
+                    )
+                    specialized_visualizer._create_multi_intensity_animation(
+                        stage_dir, intensities, vis_data_list
+                    )
+                
                 print(f"    ✅ Visualisations Stage {stage_id} sauvegardées dans {stage_dir}")
     
     def _create_stage_animations(self, stage_id: int, stage_dir: Path,
