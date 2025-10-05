@@ -3,10 +3,13 @@ Stage 4 : Apprentissage avec intensités variables.
 Gestion avancée avec intensités de source dynamiques.
 """
 
-import torch
-import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
-from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+
+import numpy as np
+import torch
+
+from ..base_stage import BaseStage, StageConfig
+from ..environment_generator import EnvironmentGenerator
 
 
 class Stage4Config(StageConfig):
@@ -129,7 +132,7 @@ class Stage4(BaseStage):
                            seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement pour les intensités variables.
-        Environnement modéré pour se concentrer sur l'apprentissage des intensités.
+        Utilise l'EnvironmentGenerator pour factorisation.
         
         Args:
             size: Taille de la grille
@@ -138,58 +141,21 @@ class Stage4(BaseStage):
             
         Returns:
             Masque des obstacles modéré pour Stage 4
+            
+        Raises:
+            RuntimeError: Si impossible de générer un environnement valide
         """
-        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=self.device)
-
-        if seed is not None:
-            g = torch.Generator(device=self.device)
-            g.manual_seed(seed)
-        else:
-            g = None
-
-        # Nombre d'obstacles modéré (focus sur les intensités)
-        n_obstacles = torch.randint(
-            self.config.min_obstacles,
-            self.config.max_obstacles + 1,
-            (1,),
-            generator=g,
-            device=self.device
-        ).item()
-
-        source_i, source_j = source_pos
-        placed_obstacles = []
-
-        # Placement d'obstacles avec contraintes simplifiées
-        for obstacle_idx in range(n_obstacles):
-            obstacle_size = torch.randint(
-                self.min_obstacle_size,
-                self.max_obstacle_size + 1,
-                (1,),
-                generator=g,
-                device=self.device
-            ).item()
-
-            max_pos = size - obstacle_size
-            if max_pos <= 1:
-                continue
-
-            # Placement avec validation simplifiée (focus sur intensités)
-            for attempt in range(self.placement_attempts):
-                i = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-                j = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-
-                if self._is_valid_position_stage4(i, j, obstacle_size, source_pos, placed_obstacles):
-                    obstacle_mask[i:i+obstacle_size, j:j+obstacle_size] = True
-                    placed_obstacles.append((i, j, obstacle_size))
-                    break
-
-        # Validation de connectivité avec seuil permissif
-        if not StageEnvironmentValidator.validate_connectivity(obstacle_mask, source_pos,
-                                                             min_connectivity_ratio=0.6):
-            # Fallback vers environnement simple
-            return self._generate_simple_environment(size, source_pos, seed)
-
-        return obstacle_mask
+        # Utilisation de l'EnvironmentGenerator pour factorisation
+        env_generator = EnvironmentGenerator(self.device)
+        return env_generator.generate_variable_intensity_environment(
+            size, source_pos,
+            min_obstacles=self.config.min_obstacles,
+            max_obstacles=self.config.max_obstacles,
+            min_obstacle_size=self.min_obstacle_size,
+            max_obstacle_size=self.max_obstacle_size,
+            placement_attempts=self.placement_attempts,
+            seed=seed
+        )
     
     def _is_valid_position_stage4(self, i: int, j: int, obstacle_size: int,
                                  source_pos: Tuple[int, int],
@@ -208,15 +174,6 @@ class Stage4(BaseStage):
                 return False
         
         return True
-    
-    def _generate_simple_environment(self, size: int, source_pos: Tuple[int, int],
-                                   seed: Optional[int] = None) -> torch.Tensor:
-        """Environnement de fallback simple pour Stage 4."""
-        # Import conditionnel pour éviter la dépendance circulaire
-        from ..stage2 import Stage2
-        
-        fallback_stage = Stage2(self.device, self.min_obstacle_size, self.max_obstacle_size)
-        return fallback_stage.generate_environment(size, source_pos, seed)
     
     def sample_source_intensity(self, epoch_progress: float) -> float:
         """

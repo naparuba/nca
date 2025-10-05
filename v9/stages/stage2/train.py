@@ -6,7 +6,8 @@ Introduction progressive des obstacles dans l'environnement.
 import torch
 import random
 from typing import Dict, Any, List, Optional, Tuple
-from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig
+from ..environment_generator import EnvironmentGenerator
 
 
 class Stage2Config(StageConfig):
@@ -41,6 +42,7 @@ class Stage2(BaseStage):
                            seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement avec un seul obstacle.
+        Utilise l'EnvironmentGenerator pour la génération d'obstacles.
         
         Args:
             size: Taille de la grille
@@ -49,47 +51,18 @@ class Stage2(BaseStage):
             
         Returns:
             Masque des obstacles avec un obstacle unique
+            
+        Raises:
+            RuntimeError: Si impossible de générer un environnement valide
         """
-        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=self.device)
-
-        if seed is not None:
-            g = torch.Generator(device=self.device)
-            g.manual_seed(seed)
-        else:
-            g = None
-
-        # Un seul obstacle de taille aléatoire
-        obstacle_size = torch.randint(
-            self.min_obstacle_size,
-            self.max_obstacle_size + 1,
-            (1,),
-            generator=g,
-            device=self.device
-        ).item()
-
-        # Placement en évitant la source et les bords
-        max_pos = size - obstacle_size
-        if max_pos <= 1:
-            return obstacle_mask  # Grille trop petite
-
-        source_i, source_j = source_pos
-
-        # Tentatives de placement d'obstacle
-        for attempt in range(100):
-            i = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-            j = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-
-            # Vérifier non-chevauchement avec source
-            if not (i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size):
-                obstacle_mask[i:i+obstacle_size, j:j+obstacle_size] = True
-                break
-
-        # Validation de connectivité
-        if not StageEnvironmentValidator.validate_connectivity(obstacle_mask, source_pos):
-            # Si connectivité insuffisante, retourner environnement vide
-            return torch.zeros((size, size), dtype=torch.bool, device=self.device)
-
-        return obstacle_mask
+        # Utilisation de l'EnvironmentGenerator pour factorisation
+        env_generator = EnvironmentGenerator(self.device)
+        return env_generator.generate_single_obstacle_environment(
+            size, source_pos,
+            min_obstacle_size=self.min_obstacle_size,
+            max_obstacle_size=self.max_obstacle_size,
+            seed=seed
+        )
     
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]:
         """

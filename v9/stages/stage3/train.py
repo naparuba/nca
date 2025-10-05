@@ -5,7 +5,8 @@ Gestion de la complexité avec plusieurs obstacles simultanés.
 
 import torch
 from typing import Dict, Any, List, Optional, Tuple
-from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig
+from ..environment_generator import EnvironmentGenerator
 
 
 class Stage3Config(StageConfig):
@@ -41,6 +42,7 @@ class Stage3(BaseStage):
                            seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement avec obstacles multiples.
+        Utilise l'EnvironmentGenerator pour factorisation.
         
         Args:
             size: Taille de la grille
@@ -48,66 +50,22 @@ class Stage3(BaseStage):
             seed: Graine pour la reproductibilité
             
         Returns:
-            Masque des obstacles avec multiple obstacles
-        """
-        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=self.device)
-
-        if seed is not None:
-            g = torch.Generator(device=self.device)
-            g.manual_seed(seed)
-        else:
-            g = None
-
-        # Nombre d'obstacles variable
-        n_obstacles = torch.randint(
-            self.config.min_obstacles,
-            self.config.max_obstacles + 1,
-            (1,),
-            generator=g,
-            device=self.device
-        ).item()
-
-        source_i, source_j = source_pos
-        placed_obstacles = []
-
-        # Placement de chaque obstacle
-        for obstacle_idx in range(n_obstacles):
-            obstacle_size = torch.randint(
-                self.min_obstacle_size,
-                self.max_obstacle_size + 1,
-                (1,),
-                generator=g,
-                device=self.device
-            ).item()
-
-            max_pos = size - obstacle_size
-            if max_pos <= 1:
-                continue
-
-            # Tentatives de placement avec validation
-            placed = False
-            for attempt in range(self.placement_attempts):
-                i = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-                j = torch.randint(1, max_pos, (1,), generator=g, device=self.device).item()
-
-                if self._is_valid_obstacle_position(i, j, obstacle_size,
-                                                  source_pos, placed_obstacles):
-                    obstacle_mask[i:i+obstacle_size, j:j+obstacle_size] = True
-                    placed_obstacles.append((i, j, obstacle_size))
-                    placed = True
-                    break
+            Masque des obstacles avec obstacles multiples
             
-            # Si impossible de placer, on continue avec les obstacles déjà placés
-            if not placed:
-                break
-
-        # Validation finale de connectivité
-        if not StageEnvironmentValidator.validate_connectivity(obstacle_mask, source_pos,
-                                                             min_connectivity_ratio=0.4):
-            # Fallback vers un environnement plus simple
-            return self._generate_fallback_environment(size, source_pos, seed)
-
-        return obstacle_mask
+        Raises:
+            RuntimeError: Si impossible de générer un environnement valide
+        """
+        # Utilisation de l'EnvironmentGenerator pour factorisation
+        env_generator = EnvironmentGenerator(self.device)
+        return env_generator.generate_complex_environment(
+            size, source_pos,
+            min_obstacles=self.config.min_obstacles,
+            max_obstacles=self.config.max_obstacles,
+            min_obstacle_size=self.min_obstacle_size,
+            max_obstacle_size=self.max_obstacle_size,
+            placement_attempts=self.placement_attempts,
+            seed=seed
+        )
     
     def _is_valid_obstacle_position(self, i: int, j: int, obstacle_size: int,
                                   source_pos: Tuple[int, int],
@@ -143,15 +101,6 @@ class Stage3(BaseStage):
             return False
         
         return True
-    
-    def _generate_fallback_environment(self, size: int, source_pos: Tuple[int, int],
-                                     seed: Optional[int] = None) -> torch.Tensor:
-        """Génère un environnement de fallback plus simple si la génération complexe échoue."""
-        # Import conditionnel pour éviter la dépendance circulaire
-        from ..stage2 import Stage2
-        
-        fallback_stage = Stage2(self.device, self.min_obstacle_size, self.max_obstacle_size)
-        return fallback_stage.generate_environment(size, source_pos, seed)
     
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]:
         """

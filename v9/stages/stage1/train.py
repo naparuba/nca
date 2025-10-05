@@ -5,7 +5,8 @@ Stage de base pour l'apprentissage de la diffusion pure.
 
 import torch
 from typing import Dict, Any, List, Optional, Tuple
-from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig
+from ..environment_generator import EnvironmentGenerator
 
 
 class Stage1Config(StageConfig):
@@ -38,6 +39,7 @@ class Stage1(BaseStage):
                            seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement vide (aucun obstacle).
+        Utilise l'EnvironmentGenerator pour la factorisation.
         
         Args:
             size: Taille de la grille
@@ -47,7 +49,8 @@ class Stage1(BaseStage):
         Returns:
             Masque d'obstacles vide
         """
-        return torch.zeros((size, size), dtype=torch.bool, device=self.device)
+        env_generator = EnvironmentGenerator(self.device)
+        return env_generator.generate_empty_environment(size)
     
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]:
         """
