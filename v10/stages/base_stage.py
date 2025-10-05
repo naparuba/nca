@@ -166,6 +166,32 @@ class BaseStage(ABC):
             'lr': [],
             'metrics': {}
         }
+    
+    def initialize_sequence(self, n_steps: int, progress: float = 0.5) -> None:
+        """
+        Initialise une séquence pour ce stage.
+        Appelé avant de générer une séquence de simulation.
+        
+        Args:
+            n_steps: Nombre de pas de temps dans la séquence
+            progress: Progression dans l'entraînement (0.0 à 1.0)
+        """
+        # Par défaut, ne fait rien
+        pass
+        
+    def get_source_intensity_at_step(self, step: int, initial_intensity: float) -> float:
+        """
+        Détermine l'intensité de la source à un pas de temps donné.
+        
+        Args:
+            step: Pas de temps actuel
+            initial_intensity: Intensité initiale de la source
+            
+        Returns:
+            Intensité de la source pour ce pas de temps
+        """
+        # Par défaut, intensité constante
+        return initial_intensity
 
 
 class StageEnvironmentValidator:

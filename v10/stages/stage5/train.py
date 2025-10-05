@@ -264,20 +264,18 @@ class Stage5(BaseStage):
             seed=seed
         )
     
-    def initialize_temporal_sequence(self, epoch_progress: float, n_steps: int) -> int:
+    def initialize_sequence(self, n_steps: int, progress: float = 0.5) -> None:
         """
         Initialise une nouvelle séquence d'atténuation temporelle.
+        Surcharge la méthode de BaseStage.
         
         Args:
-            epoch_progress: Progression dans l'étape 5 (0.0 à 1.0)
             n_steps: Nombre de pas de temps dans la séquence
-            
-        Returns:
-            Identifiant de la séquence
+            progress: Progression dans l'entraînement (0.0 à 1.0)
         """
         # Échantillonnage de l'intensité initiale et du taux d'atténuation
-        initial_intensity = self.attenuation_manager.sample_initial_intensity(epoch_progress)
-        attenuation_rate = self.attenuation_manager.sample_attenuation_rate(epoch_progress)
+        initial_intensity = self.attenuation_manager.sample_initial_intensity(progress)
+        attenuation_rate = self.attenuation_manager.sample_attenuation_rate(progress)
         
         # Génération de la séquence
         self.current_sequence = self.attenuation_manager.generate_temporal_sequence(
@@ -286,183 +284,88 @@ class Stage5(BaseStage):
         # Mise à jour de l'état
         self.current_sequence_id = len(self.attenuation_manager.current_time_sequences) - 1
         self.current_step = 0
+    
+    def get_source_intensity_at_step(self, step: int, initial_intensity: float = None) -> float:
+        """
+        Récupère l'intensité de la source à un pas de temps spécifique.
+        Surcharge la méthode de BaseStage.
         
-        return self.current_sequence_id
+        Args:
+            step: Pas de temps actuel
+            initial_intensity: Intensité initiale (ignorée, utilisé pour compatibilité)
+            
+        Returns:
+            Intensité de la source pour ce pas de temps
+        """
+        if self.current_sequence is None or step >= len(self.current_sequence):
+            return 0.0
+            
+        return self.current_sequence[step]
     
     def sample_source_intensity(self, epoch_progress: float) -> float:
         """
         Échantillonne l'intensité initiale de la source pour cette simulation.
         Compatible avec l'interface du Stage 4.
+        
+        Args:
+            epoch_progress: Progression dans l'entraînement (0.0 à 1.0)
+            
+        Returns:
+            Intensité initiale échantillonnée
         """
         return self.attenuation_manager.sample_initial_intensity(epoch_progress)
     
-    def get_source_intensity_at_step(self, step: int) -> float:
-        """
-        Récupère l'intensité de la source à un pas de temps spécifique.
-        Fonction essentielle pour l'atténuation temporelle.
-        """
-        if self.current_sequence is None or step >= len(self.current_sequence):
-            return 0.0
-        
-        return self.current_sequence[step]
-    
-    def step_intensity(self) -> float:
-        """
-        Avance d'un pas dans la séquence d'atténuation.
-        
-        Returns:
-            Nouvelle intensité après atténuation
-        """
-        if self.current_sequence is None:
-            return 0.0
-        
-        self.current_step = min(self.current_step + 1, len(self.current_sequence) - 1)
-        return self.current_sequence[self.current_step]
-    
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]:
         """
-        Prépare les données d'entraînement pour le Stage 5.
-        
-        Returns:
-            Paramètres d'entraînement optimisés pour l'atténuation temporelle
-        """
-        return {
-            'cache_size': 0,  # Pas de cache car atténuation dynamique
-            'use_cache': False,  # Génération à la volée requise
-            'shuffle_frequency': 0,  # Non applicable
-            'source_intensity': None,  # Intensité variable
-            'validation_frequency': 5,  # Validation très fréquente
-            'obstacle_validation': True,
-            'intensity_validation': True,
-            'temporal_attenuation': True,  # Nouveau : atténuation temporelle
-            'min_connectivity_ratio': 0.6,  # Connectivité permissive
-        }
-    
-    def validate_convergence(self, recent_losses: List[float],
-                           epoch_in_stage: int) -> bool:
-        """
-        Critères de convergence pour le Stage 5.
-        Adapté à l'atténuation temporelle des sources.
+        Prépare les données d'entraînement pour ce stage.
         
         Args:
-            recent_losses: Pertes récentes
-            epoch_in_stage: Époque courante dans le stage
+            global_config: Configuration globale du système
+        
+        Returns:
+            Paramètres d'entraînement
+        """
+        return {
+            'batch_size': self.config.batch_size or global_config.BATCH_SIZE,
+        }
+    
+    def validate_convergence(self, recent_losses: List[float], epoch_in_stage: int) -> bool:
+        """
+        Vérifie si l'entraînement du Stage 5 a convergé.
+        
+        Args:
+            recent_losses: Historique récent des pertes
+            epoch_in_stage: Époque actuelle dans ce stage
             
         Returns:
-            True si convergé
+            True si le stage a convergé
         """
-        # Minimum 40 époques pour l'apprentissage de l'atténuation temporelle
-        if epoch_in_stage < 40 or len(recent_losses) < 25:
+        if len(recent_losses) < 10:
             return False
+            
+        # Convergence si perte < seuil pendant 5 époques consécutives
+        recent_convergence = all(
+            loss < self.config.convergence_threshold
+            for loss in recent_losses[-5:]
+        )
         
-        # Convergence sur fenêtre étendue (atténuation = plus de variance)
-        avg_recent_loss = sum(recent_losses[-25:]) / 25
-        converged = avg_recent_loss < self.config.convergence_threshold
-        
-        # Stabilité adaptée à l'atténuation temporelle
-        if len(recent_losses) >= 20:
-            last_20 = recent_losses[-20:]
-            variance = sum((x - sum(last_20)/20)**2 for x in last_20) / 20
-            stable = variance < 0.004  # Seuil plus permissif pour l'atténuation
-        else:
-            stable = False
-        
-        # Critère de progression constante sur long terme
-        if len(recent_losses) >= 35:
-            early_period = sum(recent_losses[-35:-20]) / 15
-            recent_period = sum(recent_losses[-15:]) / 15
-            progressing = recent_period <= early_period * 1.15  # Max 15% de remontée
-        else:
-            progressing = True
-        
-        return converged and stable and progressing
-    
-    def get_learning_rate_schedule(self, epoch_in_stage: int,
-                                 max_epochs: int, base_lr: float) -> float:
-        """
-        Schedule LR ultra-spécialisé pour le Stage 5.
-        Adapté à l'apprentissage de l'atténuation temporelle.
-        """
-        stage_lr = base_lr * self.config.learning_rate_multiplier
-        progress = epoch_in_stage / max_epochs
-        
-        # Phase 1 : Warm-up très étendu (25% des époques)
-        if progress < 0.25:
-            warmup_factor = progress / 0.25
-            final_lr = stage_lr * (0.2 + 0.8 * warmup_factor)
-        # Phase 2 : Plateau d'adaptation (35% des époques)
-        elif progress < 0.6:
-            final_lr = stage_lr * 0.75
-        # Phase 3 : Fine-tuning très graduel
-        else:
-            adjusted_progress = (progress - 0.6) / 0.4
-            cos_factor = 0.5 * (1 + np.cos(np.pi * adjusted_progress))
-            final_lr = stage_lr * (0.2 + 0.55 * cos_factor)
-        
-        return final_lr
+        return recent_convergence and epoch_in_stage >= 20
     
     def get_loss_weights(self) -> Dict[str, float]:
-        """Poids des pertes pour le Stage 5."""
-        return {
-            'mse': 1.0,
-            'convergence': 1.2,
-            'stability': 2.5,
-            'robustness': 2.0,
-            'intensity_adaptation': 2.0,
-            'temporal_consistency': 2.5,  # Nouveau : cohérence temporelle
-            'attenuation_learning': 2.0,  # Nouveau : apprentissage d'atténuation
-        }
+        """
+        Retourne les poids pour la fonction de perte.
+        
+        Returns:
+            Dictionnaire des poids de la perte
+        """
+        # Pondération plus forte pour Stage 5
+        return {'mse': 1.5}
     
-    def post_epoch_hook(self, epoch_in_stage: int, loss: float,
-                       metrics: Dict[str, Any]) -> None:
-        """Hook post-époque pour le Stage 5."""
-        super().post_epoch_hook(epoch_in_stage, loss, metrics)
+    def get_intensity_statistics(self) -> Dict[str, float]:
+        """
+        Retourne les statistiques des intensités utilisées.
         
-        # Métriques spécifiques au Stage 5
-        intensity_stats = self.attenuation_manager.get_intensity_statistics()
-        attenuation_stats = self.attenuation_manager.get_attenuation_statistics()
-        
-        stage_metrics = {
-            'convergence_progress': max(0, 1 - loss / self.config.convergence_threshold),
-            'intensity_adaptation_score': self._calculate_intensity_adaptation(),
-            'temporal_consistency_score': self._calculate_temporal_consistency(),
-            'attenuation_mastery': self._calculate_attenuation_mastery(epoch_in_stage),
-            'current_intensity_mean': intensity_stats.get('mean', 0.0),
-            'current_attenuation_mean': attenuation_stats.get('mean', 0.0),
-        }
-        
-        for key, value in stage_metrics.items():
-            if key not in self.training_history['metrics']:
-                self.training_history['metrics'][key] = []
-            self.training_history['metrics'][key].append(value)
-    
-    def _calculate_intensity_adaptation(self) -> float:
-        """Score d'adaptation aux intensités variables."""
-        # Simplification pour implémentation
-        intensity_stats = self.attenuation_manager.get_intensity_statistics()
-        if intensity_stats['count'] < 10:
-            return 0.0
-        
-        # Estimation simple basée sur la variance et l'étendue
-        variance_factor = min(1.0, intensity_stats['std'] * 5)
-        range_factor = min(1.0, (intensity_stats['max'] - intensity_stats['min']) / 0.7)
-        
-        return (variance_factor + range_factor) / 2
-    
-    def _calculate_temporal_consistency(self) -> float:
-        """Score de cohérence temporelle pour l'atténuation."""
-        # Pour l'implémentation initiale, retourne une valeur simulée
-        return min(1.0, len(self.attenuation_manager.attenuation_history) / 500)
-    
-    def _calculate_attenuation_mastery(self, epoch_in_stage: int) -> float:
-        """Score de maîtrise de l'atténuation."""
-        # Simplification pour implémentation
-        attenuation_stats = self.attenuation_manager.get_attenuation_statistics()
-        if attenuation_stats['count'] < 10:
-            return 0.0
-        
-        # Progression de l'apprentissage d'atténuation
-        progress_factor = min(1.0, epoch_in_stage / 100)
-        rate_factor = min(1.0, attenuation_stats['mean'] / self.config.max_attenuation_rate)
-        
-        return (progress_factor + rate_factor) / 2
+        Returns:
+            Statistiques d'intensité
+        """
+        return self.attenuation_manager.get_intensity_statistics()

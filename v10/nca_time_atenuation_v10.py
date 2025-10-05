@@ -117,7 +117,7 @@ class ModularDiffusionSimulator:
         # Contraintes
         new_grid[obstacle_mask] = 0.0
 
-        # Support intensité variable pour Stage 4
+        # Support intensité variable
         if source_intensity is not None:
             new_grid[source_mask] = source_intensity
         else:
@@ -135,7 +135,7 @@ class ModularDiffusionSimulator:
             stage: Instance du stage à utiliser
             n_steps: Nombre d'étapes de simulation
             size: Taille de la grille
-            source_intensity: Intensité spécifique (pour Stage 4)
+            source_intensity: Intensité spécifique
             seed: Graine pour la reproductibilité
             
         Returns:
@@ -154,9 +154,9 @@ class ModularDiffusionSimulator:
         # Génération d'obstacles via le stage
         obstacle_mask = stage.generate_environment(size, (i0, j0), seed)
 
-        # Gestion intensité variable pour Stage 4
+        # Gestion intensité
         if hasattr(stage, 'sample_source_intensity') and source_intensity is None:
-            # Stage 4 avec échantillonnage automatique
+            # Échantillonnage automatique selon le stage
             used_intensity = stage.sample_source_intensity(0.5)  # Milieu de progression
         elif source_intensity is not None:
             # Intensité spécifiée
@@ -176,23 +176,17 @@ class ModularDiffusionSimulator:
         if obstacle_mask[i0, j0]:
             obstacle_mask[i0, j0] = False
 
-        # Gestion spéciale pour Stage 5 (Atténuation Temporelle)
-        is_stage5 = hasattr(stage, 'initialize_temporal_sequence')
-        if is_stage5:
-            # Initialiser une séquence d'atténuation temporelle
-            stage.initialize_temporal_sequence(0.5, n_steps + 1)  # +1 car on inclut l'état initial
+        # Permettre au stage d'initialiser la séquence (pour atténuation, etc.)
+        stage.initialize_sequence(n_steps, 0.5)  # 0.5 = milieu de progression
 
         # Simulation temporelle
         sequence = [grid.clone()]
         for step in range(n_steps):
-            # Gestion spéciale pour Stage 5 (intensité variable dans le temps)
-            if is_stage5:
-                current_intensity = stage.get_source_intensity_at_step(step + 1)  # +1 car on a déjà utilisé l'état initial
-                grid = self.step(grid, source_mask, obstacle_mask, current_intensity)
-            else:
-                # Pour les autres stages, comportement standard
-                grid = self.step(grid, source_mask, obstacle_mask,
-                               used_intensity if hasattr(stage, 'sample_source_intensity') else None)
+            # Obtenir l'intensité de la source pour ce pas de temps, selon la logique du stage
+            current_intensity = stage.get_source_intensity_at_step(step, used_intensity)
+            
+            # Application du pas de simulation avec l'intensité déterminée par le stage
+            grid = self.step(grid, source_mask, obstacle_mask, current_intensity)
             sequence.append(grid.clone())
 
         return sequence, source_mask, obstacle_mask, used_intensity
