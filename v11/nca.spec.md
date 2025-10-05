@@ -20,6 +20,10 @@ Le NCA Modulaire v11 représente une **évolution de l'architecture modulaire v1
 
 Cette version v11 maintient la fonctionnalité clé introduite en v10 : **l'atténuation temporelle des sources**. Le système apprend à gérer des sources dont l'intensité diminue progressivement au cours du temps, simulant des phénomènes physiques comme le refroidissement ou l'épuisement d'une ressource.
 
+### Innovation v11 : Sources Multiples avec Caractéristiques Indépendantes
+
+Cette version v11 introduit une nouvelle fonctionnalité majeure : **la gestion de sources multiples avec caractéristiques indépendantes**. Dans le Stage 6, le système apprend à gérer plusieurs sources de chaleur, chacune avec sa propre intensité et son propre taux d'atténuation, permettant de simuler des environnements thermiques complexes avec interactions entre sources.
+
 ### Concepts Métier Principaux
 
 #### Neural Cellular Automaton (NCA)
@@ -34,12 +38,13 @@ Cette version v11 maintient la fonctionnalité clé introduite en v10 : **l'att�
 - **Obstacles** : Zones imperméables (température fixée à 0)
 - **Diffusion** : Propagation par convolution avec noyau moyenneur 3x3
 - **Équilibre thermique** : État stable après convergence
+- **Interaction thermique** : Cumul des chaleurs aux points d'influence commune
 
 ---
 
 ## Spécifications Fonctionnelles
 
-### 1. Architecture à 5 Stages Progressifs
+### 1. Architecture à 6 Stages Progressifs
 
 #### Stage 1 : Apprentissage de Base (Sans Obstacles)
 **Objectif** : Établir les bases de la diffusion thermique pure
@@ -99,6 +104,22 @@ Cette version v11 maintient la fonctionnalité clé introduite en v10 : **l'att�
 - **Critères** : Adaptation au refroidissement progressif, stabilité avec source faiblissante
 - **Pertes spécialisées** : MSE standard + perte sur cellules sources + perte de cohérence temporelle
 
+#### Stage 6 : Sources Multiples avec Caractéristiques Indépendantes
+**Objectif** : Maîtriser les interactions entre plusieurs sources de chaleur aux comportements distincts
+
+- **Environnement** : 1-2 obstacles, **1 à 3 sources avec caractéristiques indépendantes**
+- **Durée** : 16.7% du temps total (167 époques sur 1000)
+- **Innovation** : 
+  - **Sources multiples** : Entre 1 et 3 sources simultanées
+  - **Intensités indépendantes** : Chaque source possède sa propre intensité (0.3 à 1.0)
+  - **Taux d'atténuation indépendants** : Chaque source possède son propre taux d'atténuation (0.001 à 0.02)
+  - **Interactions thermiques** : Gestion des zones d'influence communes (cumul de chaleur)
+  - Curriculum progressif : augmentation graduelle du nombre de sources
+- **Convergence** : Seuil très fin de 0.000005
+- **Learning Rate** : Extrêmement réduit (multiplicateur 0.2)
+- **Critères** : Précision des interactions, stabilité avec sources multiples, fidélité physique
+- **Pertes spécialisées** : MSE standard + perte sur cellules sources + perte de cohérence temporelle + perte d'interaction spatiale
+
 
 ### 2. Curriculum d'Apprentissage Progressif
 
@@ -123,6 +144,14 @@ Phase 3 (50-75% des époques) : Intensités [0.3, 1.0], Atténuation modérée
 Phase 4 (75-100% des époques): Intensités [0.3, 1.0], Atténuation complète (jusqu'à 0.015)
 ```
 
+#### Phase 6 : Curriculum de Sources Multiples
+```
+Phase 1 (0-25% des époques)   : 1 source unique, intensité [0.5, 1.0], atténuation [0.001, 0.008]
+Phase 2 (25-50% des époques)  : 1-2 sources, intensités [0.4, 1.0], atténuation [0.001, 0.01]
+Phase 3 (50-75% des époques)  : 2 sources, intensités [0.3, 1.0], atténuation [0.001, 0.015] 
+Phase 4 (75-100% des époques) : 1-3 sources, intensités [0.3, 1.0], atténuation complète [0.001, 0.02]
+```
+
 ### 3. Cas d'Utilisation Principaux
 
 #### CU-1 : Entraînement Complet du Curriculum
@@ -131,7 +160,7 @@ Phase 4 (75-100% des époques): Intensités [0.3, 1.0], Atténuation complète (
 
 **Scénario nominal :**
 1. Lancement avec paramètres (seed, epochs, learning rate)
-2. Exécution séquentielle des stages 1→2→3→4→5
+2. Exécution séquentielle des stages 1→2→3→4→5→6
 3. Validation de convergence à chaque stage
 4. Sauvegarde des checkpoints intermédiaires
 5. Génération automatique des visualisations
@@ -285,10 +314,10 @@ v11/
 │   │   ├── train.py               # Stage1 + Stage1Config
 │   │   └── visualizer.py          # Stage1Visualizer
 │   ├── ...
-│   └── stage5/
+│   └── stage6/
 │       ├── __init__.py
-│       ├── train.py               # Stage5 + Stage5Config + TemporalAttenuationManager
-│       └── visualizer.py          # Stage5Visualizer
+│       ├── train.py               # Stage6 + Stage6Config + TemporalAttenuationManager
+│       └── visualizer.py          # Stage6Visualizer
 ├── nca.spec.md                    # Documentation complète
 └── nca_outputs_modular_progressive_obstacles_variable_intensity_seed_123/
     └── ...                        # Résultats d'entraînement et visualisations
@@ -410,6 +439,7 @@ class ModularDiffusionSimulator:
 | 3 | Obstacles complexes | 2-4 | 1.0 fixe | 0.001 | 20% | 0.6 |
 | 4 | Intensités variables | 1-2 | 0.0-1.0 | 0.0015 | 20% | 0.4 |
 | 5 | Atténuation temporelle | 1-2 | 0.3-1.0 décroissant | 0.00001 | 20% | 0.3 |
+| 6 | Sources multiples | 1-2 | 0.3-1.0 avec interactions | 0.000005 | 16.7% | 0.2 |
 
 #### Fonction de Perte Spécialisée pour Stage 5
 - **MSE standard** : Sur toute la grille (poids standard)
@@ -486,6 +516,7 @@ class ModularDiffusionSimulator:
 - **Métriques spécialisées** :
   - Stage 4: Adaptation aux intensités variables
   - Stage 5: Précision de l'atténuation temporelle et stabilité du refroidissement
+  - Stage 6: Précision des interactions entre sources
 
 ### Critères de Succès Globaux
 - **Convergence complète** : Tous les stages atteignent leur seuil respectif
@@ -494,6 +525,6 @@ class ModularDiffusionSimulator:
 - **Reproductibilité** : Résultats identiques avec même seed
 
 ### Tests de Validation
-- **Tests d'intégration** : Pipeline complet des 5 stages
+- **Tests d'intégration** : Pipeline complet des 6 stages
 - **Tests de régression** : Performance maintenue vs versions précédentes
 - **Tests d'extensibilité** : Ajout de nouveaux stages sans impact
