@@ -139,8 +139,14 @@ class ModularDiffusionSimulator:
             new_grid[source_mask] = source_intensity
         else:
             # Mode avancé pour Stage 6 - intensités multiples spécifiées par position
+            # Création d'une grille d'intensités sources pour permettre le cumul
+            source_grid = torch.zeros_like(new_grid)
             for (i, j), intensity in source_intensity:
-                new_grid[i, j] = intensity
+                source_grid[i, j] += intensity  # Addition des intensités pour permettre le cumul
+            
+            # Application des intensités cumulées aux positions des sources
+            source_positions = source_grid > 0
+            new_grid[source_positions] = source_grid[source_positions]
 
         return new_grid
 
