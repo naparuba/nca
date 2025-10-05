@@ -6,7 +6,7 @@ Gestion avancée avec intensités de source dynamiques.
 import torch
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
-from .base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
 
 
 class Stage4Config(StageConfig):
@@ -213,7 +213,7 @@ class Stage4(BaseStage):
                                    seed: Optional[int] = None) -> torch.Tensor:
         """Environnement de fallback simple pour Stage 4."""
         # Import conditionnel pour éviter la dépendance circulaire
-        from .stage2 import Stage2
+        from ..stage2 import Stage2
         
         fallback_stage = Stage2(self.device, self.min_obstacle_size, self.max_obstacle_size)
         return fallback_stage.generate_environment(size, source_pos, seed)

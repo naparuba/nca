@@ -5,7 +5,7 @@ Stage de base pour l'apprentissage de la diffusion pure.
 
 import torch
 from typing import Dict, Any, List, Optional, Tuple
-from .base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
 
 
 class Stage1Config(StageConfig):

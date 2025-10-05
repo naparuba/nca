@@ -1,11 +1,12 @@
 """
-Stage 2 : Apprentissage avec un obstacle.
-Apprentissage du contournement d'obstacles simples.
+Stage 2 : Apprentissage avec obstacles simples.
+Introduction progressive des obstacles dans l'environnement.
 """
 
 import torch
+import random
 from typing import Dict, Any, List, Optional, Tuple
-from .base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
 
 
 class Stage2Config(StageConfig):

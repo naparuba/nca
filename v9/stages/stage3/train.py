@@ -5,7 +5,7 @@ Gestion de la complexité avec plusieurs obstacles simultanés.
 
 import torch
 from typing import Dict, Any, List, Optional, Tuple
-from .base_stage import BaseStage, StageConfig, StageEnvironmentValidator
+from ..base_stage import BaseStage, StageConfig, StageEnvironmentValidator
 
 
 class Stage3Config(StageConfig):
@@ -148,7 +148,7 @@ class Stage3(BaseStage):
                                      seed: Optional[int] = None) -> torch.Tensor:
         """Génère un environnement de fallback plus simple si la génération complexe échoue."""
         # Import conditionnel pour éviter la dépendance circulaire
-        from .stage2 import Stage2
+        from ..stage2 import Stage2
         
         fallback_stage = Stage2(self.device, self.min_obstacle_size, self.max_obstacle_size)
         return fallback_stage.generate_environment(size, source_pos, seed)

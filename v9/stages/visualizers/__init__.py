@@ -1,11 +1,12 @@
 """
 Initialisation du module de visualiseurs spécialisés par stage.
+Les visualiseurs sont maintenant dans leurs répertoires de stages respectifs.
 """
 
-from .stage1_visualizer import Stage1Visualizer
-from .stage2_visualizer import Stage2Visualizer
-from .stage3_visualizer import Stage3Visualizer
-from .stage4_visualizer import Stage4Visualizer
+from ..stage1 import Stage1Visualizer
+from ..stage2 import Stage2Visualizer
+from ..stage3 import Stage3Visualizer
+from ..stage4 import Stage4Visualizer
 
 # Nouveaux composants de visualisation migrés
 from .progressive_visualizer import ProgressiveVisualizer
