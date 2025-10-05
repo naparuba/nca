@@ -13,6 +13,7 @@ from .stage1 import Stage1
 from .stage2 import Stage2
 from .stage3 import Stage3
 from .stage4 import Stage4
+from .stage5 import Stage5
 
 
 class StageRegistry:
@@ -31,6 +32,7 @@ class StageRegistry:
         self.register_stage(2, Stage2)
         self.register_stage(3, Stage3)
         self.register_stage(4, Stage4)
+        self.register_stage(5, Stage5)
     
     def register_stage(self, stage_id: int, stage_class: Type[BaseStage]):
         """

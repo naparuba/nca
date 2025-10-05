@@ -25,9 +25,22 @@ STAGE_VISUALIZERS = {
 def get_visualizer(stage_id: int):
     """
     Récupère le visualiseur spécialisé pour un stage donné.
-    Retourne None si aucun visualiseur spécifique n'est disponible.
+    Instancie et retourne le visualiseur approprié.
     """
-    return STAGE_VISUALIZERS.get(stage_id)
+    # Importation directe pour Stage5Visualizer
+    if stage_id == 5 and 5 not in STAGE_VISUALIZERS:
+        from ..stage5.visualizer import Stage5Visualizer
+        STAGE_VISUALIZERS[5] = Stage5Visualizer
+        print(f"✅ Stage5Visualizer importé avec succès: {Stage5Visualizer}")
+    
+    visualizer_class = STAGE_VISUALIZERS.get(stage_id)
+    if visualizer_class:
+        instance = visualizer_class()  # Instanciation de la classe
+        print(f"✅ Visualiseur pour Stage {stage_id} instancié: {instance}")
+        return instance
+    else:
+        print(f"❌ Aucun visualiseur trouvé pour le Stage {stage_id}")
+        return None
 
 # Export des composants principaux
 __all__ = [

@@ -41,7 +41,7 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 **Objectif** : Établir les bases de la diffusion thermique pure
 
 - **Environnement** : Grille vide avec source centrale d'intensité fixe 1.0
-- **Durée** : 20% du temps total (100 époques sur 500)
+- **Durée** : 20% du temps total (200 époques sur 1000)
 - **Convergence** : Seuil strict de 0.0002 pour une base solide
 - **Learning Rate** : Taux standard (multiplicateur 1.0)
 - **Obstacles** : Aucun (min=0, max=0)
@@ -51,7 +51,7 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 **Objectif** : Apprendre le contournement d'obstacles uniques
 
 - **Environnement** : Un obstacle rectangulaire, source d'intensité 1.0
-- **Durée** : 20% du temps total (100 époques sur 500)
+- **Durée** : 20% du temps total (200 époques sur 1000)
 - **Convergence** : Seuil strict de 0.0002
 - **Learning Rate** : Réduit (multiplicateur 0.8)
 - **Obstacles** : Un seul (min=1, max=1)
@@ -61,7 +61,7 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 **Objectif** : Maîtriser les configurations multi-obstacles
 
 - **Environnement** : 2-4 obstacles variés, source d'intensité 1.0
-- **Durée** : 20% du temps total (100 époques sur 500)
+- **Durée** : 20% du temps total (200 époques sur 1000)
 - **Convergence** : Seuil plus tolérant de 0.001
 - **Learning Rate** : Fortement réduit (multiplicateur 0.6)
 - **Obstacles** : Multiples (min=2, max=4)
@@ -71,7 +71,7 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 **Objectif** : Adaptation aux intensités de source variables
 
 - **Environnement** : 1-2 obstacles, **intensité variable entre simulations**
-- **Durée** : 20% du temps total (100 époques sur 500)
+- **Durée** : 20% du temps total (200 époques sur 1000)
 - **Innovation** : 
   - Intensité **fixe pendant chaque simulation** (0.0 à 1.0)
   - Intensité **différente à chaque nouvelle simulation**
@@ -84,7 +84,7 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 **Objectif** : Maîtriser la diffusion avec sources d'intensité décroissante dans le temps
 
 - **Environnement** : 1-2 obstacles, **intensité décroissante pendant la simulation**
-- **Durée** : 20% du temps total (100 époques sur 500)
+- **Durée** : 20% du temps total (200 époques sur 1000)
 - **Innovation** : 
   - Source commençant à une intensité variable (0.3 à 1.0)
   - **Atténuation linéaire dans le temps** au cours de chaque simulation
@@ -443,7 +443,7 @@ class ModularStageManager:
 ### Paramètres Optimaux
 ```python
 # Configuration globale validée
-TOTAL_EPOCHS = 500
+TOTAL_EPOCHS = 1000
 GRID_SIZE = 16
 BATCH_SIZE = 4
 LEARNING_RATE = 1e-3

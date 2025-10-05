@@ -21,7 +21,7 @@ from pathlib import Path
 from stages import ModularStageManager, BaseStage
 
 # Import du module de visualisation v9
-from stages.visualizers import create_complete_visualization_suite
+from stages.visualizers import create_complete_visualization_suite,get_visualizer
 
 # =============================================================================
 # Configuration globale simplifiée
@@ -42,7 +42,7 @@ class GlobalConfig:
         self.SOURCE_INTENSITY = 1.0
 
         # Paramètres d'entraînement de base
-        self.TOTAL_EPOCHS = 500
+        self.TOTAL_EPOCHS = 1000  # Doublé de 500 à 1000 pour accommoder le Stage 5
         self.NCA_STEPS = 20
         self.LEARNING_RATE = 1e-3
         self.BATCH_SIZE = 4
@@ -82,7 +82,7 @@ def parse_arguments():
                        help='Graine aléatoire pour la reproductibilité')
     parser.add_argument('--vis-seed', type=int, default=3333,
                        help='Graine pour les visualisations')
-    parser.add_argument('--total-epochs', type=int, default=500,
+    parser.add_argument('--total-epochs', type=int, default=1000,
                        help='Nombre total d\'époques d\'entraînement')
     parser.add_argument('--grid-size', type=int, default=16,
                        help='Taille de la grille')
@@ -176,11 +176,23 @@ class ModularDiffusionSimulator:
         if obstacle_mask[i0, j0]:
             obstacle_mask[i0, j0] = False
 
+        # Gestion spéciale pour Stage 5 (Atténuation Temporelle)
+        is_stage5 = hasattr(stage, 'initialize_temporal_sequence')
+        if is_stage5:
+            # Initialiser une séquence d'atténuation temporelle
+            stage.initialize_temporal_sequence(0.5, n_steps + 1)  # +1 car on inclut l'état initial
+
         # Simulation temporelle
         sequence = [grid.clone()]
-        for _ in range(n_steps):
-            grid = self.step(grid, source_mask, obstacle_mask,
-                           used_intensity if hasattr(stage, 'sample_source_intensity') else None)
+        for step in range(n_steps):
+            # Gestion spéciale pour Stage 5 (intensité variable dans le temps)
+            if is_stage5:
+                current_intensity = stage.get_source_intensity_at_step(step + 1)  # +1 car on a déjà utilisé l'état initial
+                grid = self.step(grid, source_mask, obstacle_mask, current_intensity)
+            else:
+                # Pour les autres stages, comportement standard
+                grid = self.step(grid, source_mask, obstacle_mask,
+                               used_intensity if hasattr(stage, 'sample_source_intensity') else None)
             sequence.append(grid.clone())
 
         return sequence, source_mask, obstacle_mask, used_intensity
@@ -302,6 +314,7 @@ class ModularTrainer:
         
         stage_losses = []
         early_stop = False
+        epoch_in_stage = -1  # Initialisation pour gérer le cas max_epochs = 0
         
         for epoch_in_stage in range(max_epochs):
             epoch_losses = []
@@ -356,9 +369,13 @@ class ModularTrainer:
                     early_stop = True
                     break
         
+        # Gestion du cas où max_epochs = 0
+        epochs_trained = epoch_in_stage + 1
+        final_loss = stage_losses[-1] if stage_losses else float('inf')
+        
         return {
-            'epochs_trained': epoch_in_stage + 1,
-            'final_loss': stage_losses[-1] if stage_losses else float('inf'),
+            'epochs_trained': epochs_trained,
+            'final_loss': final_loss,
             'converged': early_stop,
             'loss_history': stage_losses
         }
@@ -408,24 +425,28 @@ class ModularTrainer:
         output_dir = Path(self.config.OUTPUT_DIR)
         self.stage_manager.save_stage_checkpoint(stage_id, model_state, output_dir)
 
-    def generate_stage_visualizations(self, vis_seed: int):
-        """Génère les visualisations pour chaque stage en utilisant les visualiseurs spécialisés."""
-        print(f"🎨 Génération des visualisations par stage...")
+    def generate_stage_visualizations(self, vis_seed: int) -> None:
+        """
+        Génère les visualisations pour chaque stage d'entraînement.
         
-        # Import des visualiseurs spécialisés
-        try:
-            from stages.visualizers import get_visualizer
-            has_specialized_visualizers = True
-            print(f"  ✓ Visualiseurs spécialisés disponibles")
-        except ImportError:
-            has_specialized_visualizers = False
-            print(f"  ⚠️ Visualiseurs spécialisés non disponibles, utilisation du visualiseur générique")
+        Args:
+            vis_seed: Graine aléatoire pour la reproductibilité
+        """
+        print(f"🎨 Génération des visualisations pour les stages...")
+        
+        # Import direct des visualiseurs spécialisés - sans failback silencieux
+        from stages.visualizers import get_visualizer
+        print(f"  ✓ Visualiseurs spécialisés chargés")
         
         # Configuration matplotlib
         matplotlib.use('Agg')  # Mode non-interactif pour sauvegarde
         
         # Données pour visualisations multi-intensités du Stage 4
         stage4_intensity_data = {}
+        
+        # Affichage des stages actifs pour le débogage
+        print(f"🔍 Séquence de stages: {self.stage_manager.stage_sequence}")
+        print(f"🔍 Stages actifs: {list(self.stage_manager.active_stages.keys())}")
         
         for stage_id in self.stage_manager.stage_sequence:
             if stage_id in self.stage_manager.active_stages:
@@ -437,7 +458,8 @@ class ModularTrainer:
                 stage_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Récupération du visualiseur spécialisé si disponible
-                specialized_visualizer = get_visualizer(stage_id) if has_specialized_visualizers else None
+                specialized_visualizer = get_visualizer(stage_id)
+                print(f"    🔍 Type de visualiseur obtenu pour Stage {stage_id}: {type(specialized_visualizer)}")
                 
                 # Génération de la visualisation principale
                 torch.manual_seed(vis_seed)
@@ -463,11 +485,23 @@ class ModularTrainer:
                 nca_sequence.append(grid_pred.clone())
                 
                 with torch.no_grad():
-                    for _ in range(self.config.POSTVIS_STEPS):
-                        grid_pred = self.updater.step(
-                            grid_pred, source_mask, obstacle_mask,
-                            used_intensity if hasattr(stage, 'sample_source_intensity') else None
-                        )
+                    # Gestion spéciale pour Stage 5 (intensité variable dans le temps)
+                    is_stage5 = hasattr(stage, 'initialize_temporal_sequence')
+                    if is_stage5:
+                        # Initialisation d'une nouvelle séquence temporelle pour les prédictions NCA
+                        sequence_id = stage.initialize_temporal_sequence(0.5, self.config.POSTVIS_STEPS + 1)
+                        
+                    for step in range(self.config.POSTVIS_STEPS):
+                        # Utilisation de l'intensité atténuée pour Stage 5
+                        if is_stage5:
+                            current_intensity = stage.get_source_intensity_at_step(step + 1)
+                            grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask, current_intensity)
+                        else:
+                            # Pour les autres stages, comportement standard
+                            grid_pred = self.updater.step(
+                                grid_pred, source_mask, obstacle_mask,
+                                used_intensity if hasattr(stage, 'sample_source_intensity') else None
+                            )
                         nca_sequence.append(grid_pred.clone())
                 
                 # Utilisation du visualiseur spécialisé si disponible
@@ -763,6 +797,7 @@ class ModularTrainer:
                 'epochs': list(range(len(stage_losses))),
                 'lr': [0.001] * len(stage_losses)  # Placeholder pour LR
             }
+
         
         return adapted
 
