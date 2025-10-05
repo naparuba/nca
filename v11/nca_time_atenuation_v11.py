@@ -216,6 +216,40 @@ class ModularDiffusionSimulator:
 
         return sequence, source_mask, obstacle_mask, used_intensity
 
+    def generate_stage_sequence(self, stage_id: int, n_steps: int, size: int,
+                              seed: Optional[int] = None,
+                              source_intensity: Optional[float] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor, float]:
+        """
+        Génère une séquence adaptée à un stage spécifique identifié par son ID.
+        Méthode de compatibilité pour la suite de visualisation complète.
+
+        Args:
+            stage_id: ID du stage (1, 2, 3, 4, 5 ou 6)
+            n_steps: Nombre d'étapes de simulation
+            size: Taille de la grille
+            seed: Graine pour la reproductibilité
+            source_intensity: Intensité spécifique (None = intensité standard)
+
+        Returns:
+            (séquence, masque_source, masque_obstacles, intensité_utilisée)
+        """
+        from stages import ModularStageManager
+        from stages.base_stage import BaseStage
+
+        # Création d'une instance temporaire du gestionnaire de stages
+        stage_manager = ModularStageManager(device=self.device)
+        
+        # Récupération du stage correspondant à l'ID
+        if stage_id not in stage_manager.active_stages:
+            stage_id_to_use = min(stage_manager.active_stages.keys())
+            print(f"⚠️ Stage {stage_id} non disponible, utilisation du stage {stage_id_to_use} à la place")
+            stage_id = stage_id_to_use
+            
+        stage = stage_manager.active_stages[stage_id]
+        
+        # Utilisation de la méthode existante avec l'instance du stage
+        return self.generate_sequence_with_stage(stage, n_steps, size, source_intensity, seed)
+
 
 # =============================================================================
 # Modèle NCA (inchangé)
@@ -342,8 +376,14 @@ class ModularNCAUpdater:
             new_grid[source_mask] = source_intensity
         else:
             # Mode avancé pour Stage 6 - intensités multiples spécifiées par position
+            # Création d'une grille d'intensités sources pour permettre le cumul
+            source_grid = torch.zeros_like(new_grid)
             for (i, j), intensity in source_intensity:
-                new_grid[i, j] = intensity
+                source_grid[i, j] += intensity  # Addition des intensités pour permettre le cumul
+            
+            # Application des intensités cumulées aux positions des sources
+            source_positions = source_grid > 0
+            new_grid[source_positions] = source_grid[source_positions]
 
         return new_grid
 
