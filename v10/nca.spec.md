@@ -1,5 +1,5 @@
-# Spécifications Complètes - NCA Modulaire v9
-## Architecture Découplée avec Stages Extensibles
+# Spécifications Complètes - NCA Modulaire v10
+## Architecture Découplée avec Stages Extensibles et Atténuation Temporelle
 
 *Version consolidée - 5 octobre 2025*
 
@@ -7,7 +7,7 @@
 
 ## Vue d'Ensemble du Système
 
-Le NCA Modulaire v9 représente une **refonte architecturale majeure** introduisant une architecture découplée et extensible basée sur des stages modulaires autonomes. Cette version privilégie la séparation des responsabilités, l'extensibilité et la maintenabilité du code.
+Le NCA Modulaire v10 représente une **refonte architecturale majeure** introduisant une architecture découplée et extensible basée sur des stages modulaires autonomes. Cette version privilégie la séparation des responsabilités, l'extensibilité et la maintenabilité du code.
 
 ### Innovation Principale : Architecture Modulaire Découplée
 
@@ -35,13 +35,13 @@ Le NCA Modulaire v9 représente une **refonte architecturale majeure** introduis
 
 ## Spécifications Fonctionnelles
 
-### 1. Architecture à 4 Stages Progressifs
+### 1. Architecture à 5 Stages Progressifs
 
 #### Stage 1 : Apprentissage de Base (Sans Obstacles)
 **Objectif** : Établir les bases de la diffusion thermique pure
 
 - **Environnement** : Grille vide avec source centrale d'intensité fixe 1.0
-- **Durée** : 30% du temps total (150 époques sur 500)
+- **Durée** : 20% du temps total (100 époques sur 500)
 - **Convergence** : Seuil strict de 0.0002 pour une base solide
 - **Learning Rate** : Taux standard (multiplicateur 1.0)
 - **Obstacles** : Aucun (min=0, max=0)
@@ -51,7 +51,7 @@ Le NCA Modulaire v9 représente une **refonte architecturale majeure** introduis
 **Objectif** : Apprendre le contournement d'obstacles uniques
 
 - **Environnement** : Un obstacle rectangulaire, source d'intensité 1.0
-- **Durée** : 30% du temps total (150 époques sur 500)
+- **Durée** : 20% du temps total (100 époques sur 500)
 - **Convergence** : Seuil strict de 0.0002
 - **Learning Rate** : Réduit (multiplicateur 0.8)
 - **Obstacles** : Un seul (min=1, max=1)
@@ -79,6 +79,20 @@ Le NCA Modulaire v9 représente une **refonte architecturale majeure** introduis
 - **Convergence** : Seuil adapté de 0.0015
 - **Learning Rate** : Très réduit (multiplicateur 0.4)
 - **Critères** : Adaptation universelle sur toute la plage d'intensités
+
+#### Stage 5 : Atténuation Temporelle des Sources (Nouveauté v10)
+**Objectif** : Maîtriser la diffusion avec sources d'intensité décroissante dans le temps
+
+- **Environnement** : 1-2 obstacles, **intensité décroissante pendant la simulation**
+- **Durée** : 20% du temps total (100 époques sur 500)
+- **Innovation** : 
+  - Source commençant à une intensité variable (0.3 à 1.0)
+  - **Atténuation linéaire dans le temps** au cours de chaque simulation
+  - Taux de décroissance variable entre simulations
+  - Curriculum progressif d'intensités initiales
+- **Convergence** : Seuil adapté de 0.002
+- **Learning Rate** : Très réduit (multiplicateur 0.3)
+- **Critères** : Adaptation au refroidissement progressif, stabilité avec source faiblissante
 
 ### 2. Curriculum d'Apprentissage Progressif
 
@@ -263,10 +277,14 @@ v9/stages/
 │   ├── __init__.py                 
 │   ├── train.py                    # Stage3 + Stage3Config
 │   └── visualizer.py               # Stage3Visualizer
-└── stage4/
+├── stage4/
+│   ├── __init__.py                 
+│   ├── train.py                    # Stage4 + Stage4Config + IntensityManager
+│   └── visualizer.py               # Stage4Visualizer
+└── stage5/
     ├── __init__.py                 
-    ├── train.py                    # Stage4 + Stage4Config + IntensityManager
-    └── visualizer.py               # Stage4Visualizer
+    ├── train.py                    # Stage5 + Stage5Config
+    └── visualizer.py               # Stage5Visualizer
 ```
 
 #### Interface BaseStage Standardisée
@@ -315,7 +333,7 @@ class ModularStageManager:
         self.global_config = global_config
         self.device = device
         self.active_stages = {}
-        self.stage_sequence = [1, 2, 3, 4]
+        self.stage_sequence = [1, 2, 3, 4, 5]
     
     def execute_full_curriculum(self, train_callback) -> Dict[str, Any]
     def get_stage_metrics(self) -> Dict[str, Any]
@@ -327,10 +345,11 @@ class ModularStageManager:
 
 | Stage | Objectif | Obstacles | Intensité | Seuil Convergence | Ratio Époques | LR Mult. |
 |-------|----------|-----------|-----------|-------------------|---------------|----------|
-| 1 | Diffusion pure | 0 | 1.0 fixe | 0.0002 | 30% | 1.0 |
-| 2 | Obstacles simples | 1 | 1.0 fixe | 0.0002 | 30% | 0.8 |
+| 1 | Diffusion pure | 0 | 1.0 fixe | 0.0002 | 20% | 1.0 |
+| 2 | Obstacles simples | 1 | 1.0 fixe | 0.0002 | 20% | 0.8 |
 | 3 | Obstacles complexes | 2-4 | 1.0 fixe | 0.001 | 20% | 0.6 |
 | 4 | Intensités variables | 1-2 | 0.0-1.0 | 0.0015 | 20% | 0.4 |
+| 5 | Objets mobiles | 1-3 | 0.0-1.0 | 0.002 | 20% | 0.3 |
 
 #### Mécanismes de Convergence
 - **Early Stopping** : Validation sur fenêtres de 10-20 époques selon le stage
@@ -432,14 +451,15 @@ HIDDEN_SIZE = 128
 N_LAYERS = 3
 
 # Répartition optimale par stage
-STAGE_RATIOS = {1: 0.30, 2: 0.30, 3: 0.20, 4: 0.20}
+STAGE_RATIOS = {1: 0.20, 2: 0.20, 3: 0.20, 4: 0.20, 5: 0.20}
 
 # Seuils de convergence validés
 CONVERGENCE_THRESHOLDS = {
     1: 0.0002,  # Très strict pour la base
     2: 0.0002,  # Strict pour la robustesse
     3: 0.001,   # Adapté à la complexité
-    4: 0.0015   # Tolérant aux intensités variables
+    4: 0.0015,  # Tolérant aux intensités variables
+    5: 0.002    # Très tolérant pour généralisation ultime
 }
 ```
 
@@ -499,7 +519,7 @@ TORCH_BACKENDS_CUDNN_BENCHMARK = True
 
 ## Conclusion
 
-Le NCA Modulaire v9 représente une **évolution architecturale majeure** privilégiant l'extensibilité, la maintenabilité et la performance. Cette architecture modulaire découplée permet :
+Le NCA Modulaire v10 représente une **évolution architecturale majeure** privilégiant l'extensibilité, la maintenabilité et la performance. Cette architecture modulaire découplée permet :
 
 1. **Extensibilité maximale** : Ajout trivial de nouveaux stages sans impact
 2. **Maintenance simplifiée** : Découplage complet des responsabilités
@@ -511,6 +531,6 @@ Cette base solide et évolutive ouvre la voie à des extensions futures ambitieu
 
 ---
 
-*Spécifications consolidées - NCA Modulaire v9*  
-*Architecture Découplée avec Stages Extensibles*  
+*Spécifications consolidées - NCA Modulaire v10*  
+*Architecture Découplée avec Stages Extensibles et Atténuation Temporelle*  
 *Version finale - 5 octobre 2025*
