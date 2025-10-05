@@ -159,7 +159,7 @@ class BaseStage(ABC):
         }
     
     def reset_training_history(self) -> None:
-        """Remet à zéro l'historique d'entraînement."""
+        """Réinitialise l'historique d'entraînement."""
         self.training_history = {
             'losses': [],
             'epochs': [],
@@ -167,31 +167,34 @@ class BaseStage(ABC):
             'metrics': {}
         }
     
-    def initialize_sequence(self, n_steps: int, progress: float = 0.5) -> None:
+    def initialize_sequence(self, n_steps: int, progress: float = 0.0) -> None:
         """
-        Initialise une séquence pour ce stage.
-        Appelé avant de générer une séquence de simulation.
+        Initialise une séquence temporelle pour la simulation ou prédiction.
+        Cette méthode peut être surchargée par les stages qui ont besoin
+        d'une initialisation spécifique pour les séquences temporelles.
         
         Args:
-            n_steps: Nombre de pas de temps dans la séquence
-            progress: Progression dans l'entraînement (0.0 à 1.0)
+            n_steps: Nombre de pas de temps de la séquence
+            progress: Progression de l'entraînement (0.0 à 1.0)
         """
-        # Par défaut, ne fait rien
+        # Méthode de base - ne fait rien par défaut
         pass
-        
-    def get_source_intensity_at_step(self, step: int, initial_intensity: float) -> float:
+    
+    def get_source_intensity_at_step(self, step: int, base_intensity: float) -> float:
         """
-        Détermine l'intensité de la source à un pas de temps donné.
+        Retourne l'intensité de la source à un pas de temps spécifique.
+        Cette méthode peut être surchargée par les stages qui ont besoin
+        de faire varier l'intensité de la source au cours du temps.
         
         Args:
             step: Pas de temps actuel
-            initial_intensity: Intensité initiale de la source
+            base_intensity: Intensité de base de la source
             
         Returns:
-            Intensité de la source pour ce pas de temps
+            Intensité de la source au pas de temps spécifié
         """
-        # Par défaut, intensité constante
-        return initial_intensity
+        # Comportement par défaut : intensité constante
+        return base_intensity
 
 
 class StageEnvironmentValidator:

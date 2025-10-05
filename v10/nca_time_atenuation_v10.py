@@ -234,13 +234,38 @@ class ImprovedNCA(nn.Module):
 class ModularNCAUpdater:
     """Updater NCA adapté à l'architecture modulaire."""
 
-    def __init__(self, model: ImprovedNCA, device: str):
+    def __init__(self, model: ImprovedNCA, device: str, use_temporal_feature: bool = False):
         self.model = model
         self.device = device
+        self.use_temporal_feature = use_temporal_feature
+        
+        # Vérification de cohérence entre modèle et features
+        expected_input_size = 11
+        if self.use_temporal_feature:
+            expected_input_size = 12
+            
+        if model.input_size != expected_input_size:
+            raise ValueError(f"Incohérence de dimensions: le modèle attend {model.input_size} features, "
+                           f"mais l'updater en fournit {expected_input_size}. "
+                           f"use_temporal_feature={self.use_temporal_feature}")
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
-             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None) -> torch.Tensor:
-        """Application du NCA avec support intensité variable."""
+             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None,
+             time_step: Optional[int] = None, max_steps: Optional[int] = None) -> torch.Tensor:
+        """
+        Application du NCA avec support intensité variable et information temporelle.
+        
+        Args:
+            grid: Grille actuelle
+            source_mask: Masque de la source
+            obstacle_mask: Masque des obstacles
+            source_intensity: Intensité de la source (optionnel)
+            time_step: Pas de temps actuel (optionnel)
+            max_steps: Nombre total de pas de temps (optionnel)
+            
+        Returns:
+            Nouvelle grille après application du NCA
+        """
         H, W = grid.shape
 
         # Extraction vectorisée des patches 3x3
@@ -251,7 +276,19 @@ class ModularNCAUpdater:
         # Features additionnelles
         source_flat = source_mask.flatten().float().unsqueeze(1)
         obstacle_flat = obstacle_mask.flatten().float().unsqueeze(1)
-        full_patches = torch.cat([patches, source_flat, obstacle_flat], dim=1)
+        
+        # Nouvelle feature: information temporelle normalisée (entre 0.0 et 1.0)
+        if self.use_temporal_feature:
+            if time_step is not None and max_steps is not None:
+                time_flat = torch.ones_like(source_flat) * (time_step / max_steps)
+            else:
+                # Par défaut, assume que c'est le temps 0
+                time_flat = torch.zeros_like(source_flat)
+            
+            full_patches = torch.cat([patches, source_flat, obstacle_flat, time_flat], dim=1)
+        else:
+            # Version originale sans feature temporelle
+            full_patches = torch.cat([patches, source_flat, obstacle_flat], dim=1)
 
         # Application sur positions valides
         valid_mask = ~obstacle_mask.flatten()
@@ -376,7 +413,7 @@ class ModularTrainer:
 
     def _train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor,
                    obstacle_mask: torch.Tensor, stage: BaseStage, source_intensity: float) -> float:
-        """Un pas d'entraînement."""
+        """Un pas d'entraînement avec gestion améliorée de l'atténuation temporelle."""
         self.optimizer.zero_grad()
 
         # Initialisation
@@ -384,22 +421,63 @@ class ModularTrainer:
         grid_pred[source_mask] = source_intensity
 
         total_loss = torch.tensor(0.0, device=self.device)
+        loss_weights = stage.get_loss_weights()
+        
+        # Pour le suivi de l'évolution des sources
+        source_intensity_pred_history = []
+        source_intensity_target_history = []
 
         # Déroulement temporel
         for t_step in range(self.config.NCA_STEPS):
             target = target_sequence[t_step + 1]
-            grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask,
-                                        source_intensity if hasattr(stage, 'sample_source_intensity') else None)
+            
+            # Utilisation de l'approche polymorphique pour obtenir l'intensité de source
+            current_intensity = stage.get_source_intensity_at_step(t_step, source_intensity)
+            
+            # Stockage des intensités cibles pour analyse
+            if source_mask.any():
+                source_intensity_target_history.append(target[source_mask].mean().item())
+            
+            # Application du NCA sans transmettre d'information temporelle explicite
+            grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask, current_intensity)
+            
+            # Stockage des intensités prédites pour analyse
+            if source_mask.any():
+                source_intensity_pred_history.append(grid_pred[source_mask].mean().item())
+            
+            # Perte MSE standard sur toute la grille
+            mse_loss = self.loss_fn(grid_pred, target) * loss_weights.get('mse', 1.0)
+            
+            # Perte spécifique pour les cellules sources (pour mieux apprendre l'atténuation)
+            if source_mask.any() and loss_weights.get('source_cells', 0.0) > 0:
+                source_cells_loss = self.loss_fn(
+                    grid_pred[source_mask],
+                    target[source_mask]
+                ) * loss_weights.get('source_cells', 0.0)
+                total_loss = total_loss + source_cells_loss
+            
+            # Perte principale
+            total_loss = total_loss + mse_loss
+            
+            # Pour Stage 5: ajouter une perte de cohérence temporelle
+            if t_step > 0 and loss_weights.get('temporal_consistency', 0.0) > 0 and hasattr(stage, 'config') and stage.config.stage_id == 5:
+                # Cette perte incite le modèle à maintenir une cohérence dans l'évolution temporelle
+                # Sans lui donner directement l'information temporelle
+                last_target_delta = target_sequence[t_step][source_mask] - target_sequence[t_step-1][source_mask]
+                last_pred_delta = grid_pred[source_mask] - grid_pred_old[source_mask] if 'grid_pred_old' in locals() else torch.zeros_like(grid_pred[source_mask])
+                
+                if last_target_delta.numel() > 0 and last_pred_delta.numel() > 0:
+                    temporal_loss = F.mse_loss(last_pred_delta, last_target_delta) * loss_weights.get('temporal_consistency', 0.0)
+                    total_loss = total_loss + temporal_loss
+            
+            # Sauvegarde pour la perte de cohérence temporelle
+            grid_pred_old = grid_pred.clone()
 
-            # Perte pondérée selon le stage
-            step_loss = self.loss_fn(grid_pred, target)
-            loss_weights = stage.get_loss_weights()
-            step_loss = step_loss * loss_weights.get('mse', 1.0)
-
-            total_loss = total_loss + step_loss
-
+        # Normalisation de la perte
         avg_loss = total_loss / self.config.NCA_STEPS
         avg_loss.backward()
+        
+        # Clip gradient pour stabilité
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
         self.optimizer.step()
         

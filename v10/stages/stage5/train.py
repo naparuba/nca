@@ -285,6 +285,38 @@ class Stage5(BaseStage):
         self.current_sequence_id = len(self.attenuation_manager.current_time_sequences) - 1
         self.current_step = 0
     
+    def initialize_temporal_sequence(self, progress: float, n_steps: int) -> int:
+        """
+        Initialise une séquence temporelle pour la visualisation.
+        Cette méthode est utilisée spécifiquement pour la visualisation du Stage 5.
+        
+        Args:
+            progress: Progression de l'entraînement (0.0 à 1.0)
+            n_steps: Nombre de pas de temps dans la séquence
+            
+        Returns:
+            ID de la séquence générée
+        """
+        # Utilisation d'un taux d'atténuation plus prononcé pour mieux visualiser l'effet
+        initial_intensity = self.attenuation_manager.sample_initial_intensity(progress)
+        
+        # Pour la visualisation, on utilise un taux plus élevé (0.015) pour bien voir l'effet
+        vis_attenuation_rate = 0.015
+        
+        # Génération de la séquence
+        self.current_sequence = self.attenuation_manager.generate_temporal_sequence(
+            initial_intensity, vis_attenuation_rate, n_steps)
+        
+        # Mise à jour de l'état
+        self.current_sequence_id = len(self.attenuation_manager.current_time_sequences) - 1
+        self.current_step = 0
+        
+        print(f"  🔄 Séquence temporelle générée pour visualisation: ID={self.current_sequence_id}, "
+              f"intensité initiale={initial_intensity:.3f}, "
+              f"taux d'atténuation={vis_attenuation_rate:.4f}")
+        
+        return self.current_sequence_id
+    
     def get_source_intensity_at_step(self, step: int, initial_intensity: float = None) -> float:
         """
         Récupère l'intensité de la source à un pas de temps spécifique.
@@ -298,8 +330,11 @@ class Stage5(BaseStage):
             Intensité de la source pour ce pas de temps
         """
         if self.current_sequence is None or step >= len(self.current_sequence):
-            return 0.0
+            # Si la séquence n'est pas initialisée ou l'index hors limites,
+            # utiliser l'intensité initiale ou une valeur par défaut
+            return initial_intensity if initial_intensity is not None else 0.0
             
+        # Retourne l'intensité atténuée pour ce pas de temps
         return self.current_sequence[step]
     
     def sample_source_intensity(self, epoch_progress: float) -> float:
@@ -353,13 +388,15 @@ class Stage5(BaseStage):
     
     def get_loss_weights(self) -> Dict[str, float]:
         """
-        Retourne les poids pour la fonction de perte.
-        
-        Returns:
-            Dictionnaire des poids de la perte
+        Poids des pertes pour le Stage 5 avec emphase sur l'atténuation temporelle.
+        Surcharge la méthode de BaseStage.
         """
-        # Pondération plus forte pour Stage 5
-        return {'mse': 1.5}
+        return {
+            'mse': 1.0,
+            'source_cells': 5.0,  # Accent particulier sur les cellules sources pour mieux apprendre l'atténuation
+            'stability': 1.0,
+            'temporal_consistency': 2.0  # Nouvelle métrique pour favoriser l'apprentissage de l'atténuation
+        }
     
     def get_intensity_statistics(self) -> Dict[str, float]:
         """
