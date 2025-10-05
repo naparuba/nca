@@ -18,7 +18,7 @@ class Stage2Config(StageConfig):
             stage_id=2,
             name="Un obstacle",
             description="Apprentissage du contournement d'un obstacle unique",
-            epochs_ratio=0.3,
+            epochs_ratio=0.2,  # Réduit de 0.3 à 0.2
             convergence_threshold=0.0002,
             learning_rate_multiplier=0.8,  # LR légèrement réduit
             min_obstacles=1,

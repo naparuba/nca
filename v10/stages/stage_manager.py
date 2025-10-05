@@ -108,24 +108,78 @@ class ModularStageManager:
         
         return available_stages
     
+    def _validate_stage_ratios(self):
+        """Valide que la somme des ratios d'époques est cohérente."""
+        total_ratio = 0
+        for stage_id in self.stage_sequence:
+            stage_class = self.registry.get_stage_class(stage_id)
+            ratio = stage_class(device=self.device).config.epochs_ratio
+            total_ratio += ratio
+            
+            print(f"  Stage {stage_id}: ratio={ratio:.3f}")
+        
+        # Vérification que le total des ratios est proche de 1.0
+        if not (0.99 <= total_ratio <= 1.01):
+            raise ValueError(f"La somme des ratios d'époques doit être égale à 1.0 (valeur actuelle: {total_ratio:.3f})")
+        
+        print(f"✅ Validation des ratios réussie: somme={total_ratio:.3f}")
+    
     def _calculate_epochs_per_stage(self) -> Dict[int, int]:
         """Calcule le nombre d'époques par stage selon leur configuration."""
         epochs_per_stage = {}
         
+        # Vérification préalable des ratios
+        self._validate_stage_ratios()
+        
+        print("\n=== Calcul détaillé de la répartition des époques par stage ===")
+        print(f"Nombre total d'époques planifiées: {self.total_epochs_planned}")
+        
+        # Première passe : calcul basé sur les ratios
         for stage_id in self.stage_sequence:
             # Créer temporairement le stage pour récupérer sa config
             temp_stage = self.registry.create_stage(stage_id, self.device)
             ratio = temp_stage.config.epochs_ratio
-            epochs = int(self.total_epochs_planned * ratio)
+            
+            # Calcul du nombre brut d'époques (valeur flottante)
+            raw_epochs = self.total_epochs_planned * ratio
+            
+            # Conversion en entier (arrondi vers le bas)
+            epochs = int(raw_epochs)
+            
+            # Stockage et logs
             epochs_per_stage[stage_id] = epochs
+            
+            print(f"  Stage {stage_id}: ratio={ratio:.3f}, "
+                  f"calcul={self.total_epochs_planned}*{ratio:.3f}={raw_epochs:.2f}, "
+                  f"arrondi={epochs}")
         
-        # Ajustement pour s'assurer que la somme = total prévu
+        # Deuxième passe : ajustement pour atteindre exactement le total prévu
         total_calculated = sum(epochs_per_stage.values())
+        print(f"\nSomme initiale des époques: {total_calculated}/{self.total_epochs_planned}")
+        
         if total_calculated != self.total_epochs_planned:
             # Ajuste le dernier stage
             last_stage = self.stage_sequence[-1]
             adjustment = self.total_epochs_planned - total_calculated
+
+            # Logs avant ajustement
+            print(f"  Ajustement requis: {adjustment} époques")
+            print(f"  Appliqué au dernier stage (Stage {last_stage}): "
+                  f"{epochs_per_stage[last_stage]} → {epochs_per_stage[last_stage] + adjustment}")
+            
+            # Application de l'ajustement
             epochs_per_stage[last_stage] += adjustment
+        else:
+            print("  Aucun ajustement nécessaire, la somme est exacte")
+        
+        # Vérification finale
+        print("\n=== Répartition finale des époques ===")
+        for stage_id in self.stage_sequence:
+            # Alerte visuelle pour les stages sans époques
+            status = "⚠️ AUCUNE ÉPOQUE" if epochs_per_stage[stage_id] == 0 else "✓"
+            print(f"  Stage {stage_id}: {epochs_per_stage[stage_id]} époques {status}")
+        
+        print(f"Total final: {sum(epochs_per_stage.values())}/{self.total_epochs_planned}\n")
         
         return epochs_per_stage
     
@@ -201,6 +255,9 @@ class ModularStageManager:
             
         Returns:
             Métriques de l'exécution du stage
+            
+        Raises:
+            ValueError: Si le nombre d'époques alloué au stage est zéro
         """
         if stage_id not in self.active_stages:
             stage = self.initialize_stage(stage_id)
@@ -208,6 +265,11 @@ class ModularStageManager:
             stage = self.active_stages[stage_id]
         
         max_epochs = self.epochs_per_stage[stage_id]
+        
+        # Nouvelle vérification : s'assurer qu'un stage a au moins une époque d'entraînement
+        if max_epochs == 0:
+            raise ValueError(f"Le Stage {stage_id} ({stage.config.name}) a 0 époque allouée. "
+                           f"Chaque stage doit avoir au moins une époque d'entraînement.")
         
         print(f"\n🚀 === EXÉCUTION STAGE {stage_id} - {stage.config.name.upper()} ===")
         print(f"📊 Maximum {max_epochs} époques")
