@@ -14,6 +14,7 @@ from .stage2 import Stage2
 from .stage3 import Stage3
 from .stage4 import Stage4
 from .stage5 import Stage5
+from .stage6 import Stage6
 
 
 class StageRegistry:
@@ -33,6 +34,7 @@ class StageRegistry:
         self.register_stage(3, Stage3)
         self.register_stage(4, Stage4)
         self.register_stage(5, Stage5)
+        self.register_stage(6, Stage6)
     
     def register_stage(self, stage_id: int, stage_class: Type[BaseStage]):
         """
@@ -107,7 +109,7 @@ class ModularStageManager:
             return sequence
         
         return available_stages
-    
+
     def _validate_stage_ratios(self):
         """Valide que la somme des ratios d'époques est cohérente."""
         total_ratio = 0

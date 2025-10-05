@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
-from typing import Tuple, List, Optional, Dict, Any
+from typing import Tuple, List, Optional, Dict, Any, Union
 import os
 import argparse
 import json
@@ -109,19 +109,38 @@ class ModularDiffusionSimulator:
         self.device = device
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
-             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None) -> torch.Tensor:
-        """Un pas de diffusion de chaleur avec support intensité variable."""
+             obstacle_mask: torch.Tensor, source_intensity: Optional[Union[float, List[Tuple[Tuple[int, int], float]]]] = None) -> torch.Tensor:
+        """
+        Un pas de diffusion de chaleur avec support intensité variable et sources multiples.
+        
+        Args:
+            grid: Grille actuelle
+            source_mask: Masque des sources
+            obstacle_mask: Masque des obstacles
+            source_intensity: Intensité(s) de la source - peut être:
+                - float: une valeur unique pour toutes les sources
+                - List[Tuple[Tuple[int, int], float]]: liste de tuples (position, intensité) pour chaque source
+        
+        Returns:
+            Nouvelle grille après diffusion
+        """
         x = grid.unsqueeze(0).unsqueeze(0)
         new_grid = F.conv2d(x, self.kernel, padding=1).squeeze(0).squeeze(0)
 
-        # Contraintes
+        # Contraintes - les obstacles bloquent la diffusion
         new_grid[obstacle_mask] = 0.0
 
-        # Support intensité variable
-        if source_intensity is not None:
+        # Gestion des sources selon le type de source_intensity
+        if source_intensity is None:
+            # Mode classique - maintenir les valeurs des sources
+            new_grid[source_mask] = grid[source_mask]
+        elif isinstance(source_intensity, (float, int)):
+            # Mode scalaire - une seule intensité pour toutes les sources
             new_grid[source_mask] = source_intensity
         else:
-            new_grid[source_mask] = grid[source_mask]
+            # Mode avancé pour Stage 6 - intensités multiples spécifiées par position
+            for (i, j), intensity in source_intensity:
+                new_grid[i, j] = intensity
 
         return new_grid
 
@@ -250,7 +269,7 @@ class ModularNCAUpdater:
                            f"use_temporal_feature={self.use_temporal_feature}")
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
-             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None,
+             obstacle_mask: torch.Tensor, source_intensity: Optional[Union[float, List[Tuple[Tuple[int, int], float]]]] = None,
              time_step: Optional[int] = None, max_steps: Optional[int] = None) -> torch.Tensor:
         """
         Application du NCA avec support intensité variable et information temporelle.
@@ -259,7 +278,9 @@ class ModularNCAUpdater:
             grid: Grille actuelle
             source_mask: Masque de la source
             obstacle_mask: Masque des obstacles
-            source_intensity: Intensité de la source (optionnel)
+            source_intensity: Intensité(s) de la source - peut être:
+                - float: une valeur unique pour toutes les sources
+                - List[Tuple[Tuple[int, int], float]]: liste de tuples (position, intensité) pour chaque source
             time_step: Pas de temps actuel (optionnel)
             max_steps: Nombre total de pas de temps (optionnel)
             
@@ -305,10 +326,18 @@ class ModularNCAUpdater:
 
         # Contraintes finales
         new_grid[obstacle_mask] = 0.0
-        if source_intensity is not None:
+        
+        # Gestion des sources selon le type de source_intensity
+        if source_intensity is None:
+            # Mode classique - maintenir les valeurs des sources
+            new_grid[source_mask] = grid[source_mask]
+        elif isinstance(source_intensity, (float, int)):
+            # Mode scalaire - une seule intensité pour toutes les sources
             new_grid[source_mask] = source_intensity
         else:
-            new_grid[source_mask] = grid[source_mask]
+            # Mode avancé pour Stage 6 - intensités multiples spécifiées par position
+            for (i, j), intensity in source_intensity:
+                new_grid[i, j] = intensity
 
         return new_grid
 
@@ -488,14 +517,44 @@ class ModularTrainer:
         return self.stage_manager.execute_full_curriculum(self.train_stage_callback)
 
     def save_stage_checkpoint(self, stage_id: int):
-        """Sauvegarde le checkpoint d'un stage."""
-        model_state = {
+        """
+        Sauvegarde un modèle complet pour le stage actuel.
+        Le modèle inclut l'état du modèle, l'optimiseur et les métadonnées.
+        """
+        stage = self.stage_manager.active_stages.get(stage_id)
+        if not stage:
+            print(f"⚠️ Impossible de sauvegarder le modèle pour le stage {stage_id} : stage non trouvé")
+            return
+            
+        output_dir = Path(self.config.OUTPUT_DIR)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Chemin pour le modèle complet du stage
+        model_path = output_dir / f"stage_{stage_id}_model.pth"
+        
+        # Création des métriques du stage pour inclusion dans le modèle
+        stage_metrics = {}
+        if hasattr(stage, 'get_statistics'):
+            stage_metrics = stage.get_statistics()
+        
+        # Sauvegarde du modèle complet avec métadonnées
+        torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-        }
+            'stage_id': stage_id,
+            'stage_name': stage.config.name,
+            'stage_metrics': stage_metrics,
+            'config': {k: v for k, v in self.config.__dict__.items() if not k.startswith('_')}
+        }, model_path)
         
-        output_dir = Path(self.config.OUTPUT_DIR)
-        self.stage_manager.save_stage_checkpoint(stage_id, model_state, output_dir)
+        print(f"📁 Modèle stage {stage_id} sauvegardé dans {model_path}")
+        
+        # Sauvegarde également du checkpoint standard pour compatibilité
+        checkpoint_path = output_dir / f"stage_{stage_id}_checkpoint.pth"
+        torch.save({
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }, checkpoint_path)
 
     def generate_stage_visualizations(self, vis_seed: int) -> None:
         """

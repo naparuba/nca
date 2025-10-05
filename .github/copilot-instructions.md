@@ -9,6 +9,9 @@ Tu es également un spécialiste en développement d’intelligence artificielle
 - Préférer la lisibilité à l’optimisation prématurée.  
 - Le code doit être facilement compréhensible pour un développeur qui reprend le projet.
 
+## Failback
+- tu ne dois JAMAIS proposer du code de failback si une action échoue: si quelque chose échoue, ça ève une erreur claire avec l'exception et on arrête le code
+
 ## Commentaires
 - Tous les commentaires doivent être en **français**.  
 - Les commentaires doivent être **très clairs et détaillés**.  

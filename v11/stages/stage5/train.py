@@ -20,8 +20,8 @@ class Stage5Config(StageConfig):
             stage_id=5,
             name="Atténuation Temporelle des Sources",
             description="Apprentissage avec sources d'intensité décroissante dans le temps",
-            epochs_ratio=0.2,
-            convergence_threshold=0.00001,
+            epochs_ratio=0.167,  # Ajusté pour répartition équilibrée entre 6 stages
+            convergence_threshold=0.0002,
             learning_rate_multiplier=0.3,  # LR encore plus réduit pour ce stage complexe
             min_obstacles=1,
             max_obstacles=2

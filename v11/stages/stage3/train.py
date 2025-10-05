@@ -17,7 +17,7 @@ class Stage3Config(StageConfig):
             stage_id=3,
             name="Obstacles multiples",
             description="Apprentissage avec gestion de multiples obstacles complexes",
-            epochs_ratio=0.2,
+            epochs_ratio=0.167,  # Ajusté pour répartition équilibrée entre 6 stages
             convergence_threshold=0.0002,
             learning_rate_multiplier=0.6,  # LR encore plus réduit
             min_obstacles=2,

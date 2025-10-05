@@ -20,7 +20,7 @@ class Stage4Config(StageConfig):
             stage_id=4,
             name="Intensités variables",
             description="Apprentissage avec intensités de source variables et obstacles",
-            epochs_ratio=0.2,
+            epochs_ratio=0.167,  # Ajusté pour répartition équilibrée entre 6 stages
             convergence_threshold=0.0002,
             learning_rate_multiplier=0.4,  # LR le plus réduit
             min_obstacles=1,
