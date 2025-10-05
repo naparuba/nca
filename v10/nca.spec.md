@@ -1,7 +1,7 @@
 # Spécifications Complètes - NCA Modulaire v10
 ## Architecture Découplée avec Stages Extensibles et Atténuation Temporelle
 
-*Version consolidée - 5 octobre 2025*
+*Version mise à jour - 5 octobre 2025*
 
 ---
 
@@ -15,6 +15,10 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 - **Système d'enregistrement** : Ajout facile de nouveaux stages sans modification du code existant
 - **Interface standardisée** : Tous les stages implémentent l'interface `BaseStage`
 - **Séparation visualisation/génération** : Architecture claire entre génération de données et visualisation
+
+### Nouveauté v10 : Atténuation Temporelle des Sources
+
+Cette version v10 introduit une innovation majeure : **l'atténuation temporelle des sources**. Le système apprend désormais à gérer des sources dont l'intensité diminue progressivement au cours du temps, simulant des phénomènes physiques comme le refroidissement ou l'épuisement d'une ressource.
 
 ### Concepts Métier Principaux
 
@@ -88,11 +92,12 @@ Le NCA Modulaire v10 représente une **refonte architecturale majeure** introdui
 - **Innovation** : 
   - Source commençant à une intensité variable (0.3 à 1.0)
   - **Atténuation linéaire dans le temps** au cours de chaque simulation
-  - Taux de décroissance variable entre simulations
-  - Curriculum progressif d'intensités initiales
-- **Convergence** : Seuil adapté de 0.002
+  - Taux de décroissance variable entre simulations (0.002 à 0.015 par pas)
+  - Curriculum progressif d'intensités et taux d'atténuation
+- **Convergence** : Seuil adapté de 0.00001
 - **Learning Rate** : Très réduit (multiplicateur 0.3)
 - **Critères** : Adaptation au refroidissement progressif, stabilité avec source faiblissante
+- **Pertes spécialisées** : MSE standard + perte sur cellules sources + perte de cohérence temporelle
 
 ### 2. Curriculum d'Apprentissage Progressif
 
@@ -107,6 +112,14 @@ Phase 1 (0-25% des époques)  : [0.5, 1.0] - Sources moyennes à fortes
 Phase 2 (25-50% des époques) : [0.3, 1.0] - Ajout des sources faibles  
 Phase 3 (50-75% des époques) : [0.1, 1.0] - Sources très faibles
 Phase 4 (75-100% des époques): [0.0, 1.0] - Plage complète (source éteinte incluse)
+```
+
+#### Phase 5 : Curriculum d'Atténuation Temporelle
+```
+Phase 1 (0-25% des époques)  : Intensités [0.5, 1.0], Atténuation minimale (0.002)
+Phase 2 (25-50% des époques) : Intensités [0.4, 1.0], Atténuation progressive
+Phase 3 (50-75% des époques) : Intensités [0.3, 1.0], Atténuation modérée
+Phase 4 (75-100% des époques): Intensités [0.3, 1.0], Atténuation complète (jusqu'à 0.015)
 ```
 
 ### 3. Cas d'Utilisation Principaux
@@ -259,32 +272,25 @@ TOTAL ≈ 35,457 paramètres entraînables
 
 #### Structure de Répertoires Réorganisée
 ```
-v9/stages/
-├── visualizers/                    # Classes partagées uniquement
-│   ├── intensity_animator.py       # Animation intensités variables
-│   ├── metrics_plotter.py          # Graphiques métriques
-│   ├── progressive_visualizer.py   # Visualisations progressives
-│   └── visualization_suite.py      # Suite complète
-├── stage1/
-│   ├── __init__.py                 # Export Stage1, Stage1Config, Stage1Visualizer
-│   ├── train.py                    # Stage1 + Stage1Config
-│   └── visualizer.py               # Stage1Visualizer
-├── stage2/
-│   ├── __init__.py                 
-│   ├── train.py                    # Stage2 + Stage2Config
-│   └── visualizer.py               # Stage2Visualizer
-├── stage3/
-│   ├── __init__.py                 
-│   ├── train.py                    # Stage3 + Stage3Config
-│   └── visualizer.py               # Stage3Visualizer
-├── stage4/
-│   ├── __init__.py                 
-│   ├── train.py                    # Stage4 + Stage4Config + IntensityManager
-│   └── visualizer.py               # Stage4Visualizer
-└── stage5/
-    ├── __init__.py                 
-    ├── train.py                    # Stage5 + Stage5Config
-    └── visualizer.py               # Stage5Visualizer
+v10/
+├── nca_time_atenuation_v10.py     # Fichier principal avec architecture v10
+├── stages/                        # Architecture modulaire avancée
+│   ├── visualizers/               # Classes partagées uniquement
+│   │   ├── intensity_animator.py  # Animation intensités variables
+│   │   ├── metrics_plotter.py     # Graphiques métriques
+│   │   └── ...
+│   ├── stage1/
+│   │   ├── __init__.py
+│   │   ├── train.py               # Stage1 + Stage1Config
+│   │   └── visualizer.py          # Stage1Visualizer
+│   ├── ...
+│   └── stage5/                    # NOUVEAUTÉ v10
+│       ├── __init__.py
+│       ├── train.py               # Stage5 + Stage5Config + TemporalAttenuationManager
+│       └── visualizer.py          # Stage5Visualizer
+├── nca.spec.md                    # Documentation complète
+└── nca_outputs_modular_progressive_obstacles_variable_intensity_seed_123/
+    └── ...                        # Résultats d'entraînement et visualisations
 ```
 
 #### Interface BaseStage Standardisée
@@ -307,36 +313,89 @@ class BaseStage(ABC):
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]
 ```
 
-#### Configuration par Stage
+#### TemporalAttenuationManager pour Stage 5
 ```python
-@dataclass
-class StageConfig:
-    stage_id: int
-    name: str
-    description: str
-    epochs_ratio: float = 0.25
-    convergence_threshold: float = 0.0002
-    learning_rate_multiplier: float = 1.0
-    min_obstacles: int = 0
-    max_obstacles: int = 0
+class TemporalAttenuationManager:
+    """
+    Gestionnaire spécialisé pour l'atténuation temporelle des sources du Stage 5.
+    Gère la diminution progressive de l'intensité de la source pendant la simulation.
+    """
+    
+    def sample_initial_intensity(self, epoch_progress: float) -> float:
+        """Échantillonne une intensité initiale selon progression d'entraînement"""
+    
+    def sample_attenuation_rate(self, epoch_progress: float) -> float:
+        """Échantillonne un taux d'atténuation selon progression d'entraînement"""
+    
+    def generate_temporal_sequence(self, initial_intensity: float, attenuation_rate: float,
+                                  n_steps: int) -> List[float]:
+        """Génère une séquence d'intensités décroissantes dans le temps"""
+    
+    def get_source_intensity_at_step(self, sequence_id: int, step: int) -> float:
+        """Récupère l'intensité de la source à un pas de temps spécifique"""
 ```
 
-#### Gestionnaire de Stages Modulaire
+#### Configuration du Stage 5
 ```python
-class ModularStageManager:
-    """
-    Orchestrateur principal de l'entraînement modulaire.
-    Gère l'exécution séquentielle des stages de manière découplée.
-    """
+class Stage5Config(StageConfig):
+    """Configuration spécialisée pour le Stage 5."""
     
-    def __init__(self, global_config, device: str):
-        self.global_config = global_config
-        self.device = device
-        self.active_stages = {}
-        self.stage_sequence = [1, 2, 3, 4, 5]
-    
-    def execute_full_curriculum(self, train_callback) -> Dict[str, Any]
-    def get_stage_metrics(self) -> Dict[str, Any]
+    def __init__(self):
+        super().__init__(
+            stage_id=5,
+            name="Atténuation Temporelle des Sources",
+            description="Apprentissage avec sources d'intensité décroissante dans le temps",
+            epochs_ratio=0.2,
+            convergence_threshold=0.00001,  # Seuil adapté à la complexité
+            learning_rate_multiplier=0.3,   # LR très réduit pour ce stage
+            min_obstacles=1,
+            max_obstacles=2
+        )
+        
+        # Configuration spéciale pour l'atténuation temporelle
+        self.min_source_intensity = 0.3
+        self.max_source_intensity = 1.0
+        self.initial_intensity_range = [0.5, 1.0]  # Plage initiale restreinte
+        self.final_intensity_range = [0.3, 1.0]    # Plage finale élargie
+        
+        # Configuration de l'atténuation temporelle
+        self.min_attenuation_rate = 0.002  # Atténuation minimale par pas de temps
+        self.max_attenuation_rate = 0.015  # Atténuation maximale par pas de temps
+```
+
+#### ModularNCAUpdater avec Support Temporel
+```python
+class ModularNCAUpdater:
+    """Updater NCA adapté à l'architecture modulaire avec support temporel."""
+
+    def __init__(self, model: ImprovedNCA, device: str, use_temporal_feature: bool = False):
+        # Support optionnel d'une feature temporelle (pour expérimentation)
+        self.use_temporal_feature = use_temporal_feature
+        
+    def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
+             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None,
+             time_step: Optional[int] = None, max_steps: Optional[int] = None) -> torch.Tensor:
+        """
+        Application du NCA avec support intensité variable et information temporelle.
+        """
+```
+
+#### ModularDiffusionSimulator avec Support d'Atténuation
+```python
+class ModularDiffusionSimulator:
+    def generate_sequence_with_stage(self, stage: BaseStage, n_steps: int, size: int,
+                                   source_intensity: Optional[float] = None,
+                                   seed: Optional[int] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor, float]:
+        # Permettre au stage d'initialiser la séquence (pour atténuation, etc.)
+        stage.initialize_sequence(n_steps, 0.5)  # 0.5 = milieu de progression
+
+        # Simulation temporelle avec intensité variable dans le temps
+        for step in range(n_steps):
+            # Obtenir l'intensité de la source pour ce pas de temps
+            current_intensity = stage.get_source_intensity_at_step(step, used_intensity)
+            
+            # Application du pas de simulation avec l'intensité du moment
+            grid = self.step(grid, source_mask, obstacle_mask, current_intensity)
 ```
 
 ### 3. Configuration des Stages
@@ -349,12 +408,12 @@ class ModularStageManager:
 | 2 | Obstacles simples | 1 | 1.0 fixe | 0.0002 | 20% | 0.8 |
 | 3 | Obstacles complexes | 2-4 | 1.0 fixe | 0.001 | 20% | 0.6 |
 | 4 | Intensités variables | 1-2 | 0.0-1.0 | 0.0015 | 20% | 0.4 |
-| 5 | Objets mobiles | 1-3 | 0.0-1.0 | 0.002 | 20% | 0.3 |
+| 5 | Atténuation temporelle | 1-2 | 0.3-1.0 décroissant | 0.00001 | 20% | 0.3 |
 
-#### Mécanismes de Convergence
-- **Early Stopping** : Validation sur fenêtres de 10-20 époques selon le stage
-- **Critères de stabilité** : Variance des pertes < seuils adaptatifs
-- **Learning Rate Scheduling** : Décroissance cosine personnalisée par stage
+#### Fonction de Perte Spécialisée pour Stage 5
+- **MSE standard** : Sur toute la grille (poids standard)
+- **Perte sur cellules sources** : Focus sur l'apprentissage de l'atténuation (poids élevé)
+- **Perte de cohérence temporelle** : Assure une évolution temporelle cohérente (poids moyen)
 
 ### 4. Simulation Physique Modulaire
 
@@ -423,7 +482,9 @@ class ModularStageManager:
 - **MSE temporelle** : Erreur quadratique moyenne à chaque pas de temps
 - **Convergence rate** : Vitesse d'atteinte du seuil spécifique au stage
 - **Stabilité** : Variance des pertes sur fenêtre glissante adaptative
-- **Métriques spécialisées** : Adaptation aux intensités (Stage 4), robustesse (Stage 3)
+- **Métriques spécialisées** :
+  - Stage 4: Adaptation aux intensités variables
+  - Stage 5: Précision de l'atténuation temporelle et stabilité du refroidissement
 
 ### Critères de Succès Globaux
 - **Convergence complète** : Tous les stages atteignent leur seuil respectif
@@ -459,7 +520,7 @@ CONVERGENCE_THRESHOLDS = {
     2: 0.0002,  # Strict pour la robustesse
     3: 0.001,   # Adapté à la complexité
     4: 0.0015,  # Tolérant aux intensités variables
-    5: 0.002    # Très tolérant pour généralisation ultime
+    5: 0.00001  # Très strict pour l'atténuation temporelle
 }
 ```
 
@@ -488,9 +549,9 @@ TORCH_BACKENDS_CUDNN_BENCHMARK = True
 4. **Optimisation automatique** : Recherche d'hyperparamètres par RL
 
 ### Extensions Fonctionnelles
-1. **Nouvelles physiques** : Électrostatique, fluides, chimie
+1. **Sources multiples avec atténuation indépendante** : Multiples sources avec dynamiques différentes
 2. **Obstacles dynamiques** : Environnements changeants temporellement
-3. **Multi-sources** : Systèmes avec plusieurs sources simultanées
+3. **Atténuation non-linéaire** : Modèles physiques plus complexes (exponentiel, sinusoïdal)
 4. **Apprentissage interactif** : Interface utilisateur temps réel
 
 ### Scalabilité
@@ -504,33 +565,27 @@ TORCH_BACKENDS_CUDNN_BENCHMARK = True
 ## Applications Industrielles
 
 ### Domaines d'Application
-- **Systèmes de chauffage** : Équipements de puissances variables (0% à 100%)
-- **Contrôle thermique** : Adaptation aux conditions opérationnelles variées
-- **Maintenance prédictive** : Fonctionnement avec équipements dégradés
-- **Optimisation énergétique** : Gestion efficace des ressources
+- **Systèmes de chauffage** : Équipements de puissances variables et décroissantes
+- **Contrôle thermique** : Adaptation aux conditions opérationnelles variables et transitoires
+- **Simulation de ressources épuisables** : Modélisation de consommation énergétique
+- **Optimisation énergétique** : Gestion efficace des ressources déclinantes
 
 ### Avantages Concurrentiels
 - **Modularité** : Architecture extensible et maintenable
 - **Robustesse** : Apprentissage progressif pour stabilité maximale
-- **Innovation** : Support des intensités variables (unique dans le domaine)
+- **Innovation** : Support complet de dynamiques temporelles (unique dans le domaine)
 - **Performance** : Optimisations GPU pour déploiement industriel
 
 ---
 
 ## Conclusion
 
-Le NCA Modulaire v10 représente une **évolution architecturale majeure** privilégiant l'extensibilité, la maintenabilité et la performance. Cette architecture modulaire découplée permet :
-
-1. **Extensibilité maximale** : Ajout trivial de nouveaux stages sans impact
-2. **Maintenance simplifiée** : Découplage complet des responsabilités
-3. **Performance optimisée** : Optimisations GPU ciblées et vectorisation avancée
-4. **Innovation technique** : Support pionnier des intensités variables
-5. **Validation rigoureuse** : Tests complets d'intégration et de régression
+Le NCA Modulaire v10 représente une **évolution architecturale majeure** avec l'introduction de l'**atténuation temporelle des sources**. Cette innovation permet au système de s'adapter non seulement à différentes intensités de sources mais aussi à leur variation dans le temps, simulant des phénomènes physiques comme le refroidissement ou l'épuisement d'une ressource.
 
 Cette base solide et évolutive ouvre la voie à des extensions futures ambitieuses tout en préservant la stabilité et la performance du système existant.
 
 ---
 
-*Spécifications consolidées - NCA Modulaire v10*  
+*Spécifications mises à jour - NCA Modulaire v10*  
 *Architecture Découplée avec Stages Extensibles et Atténuation Temporelle*  
 *Version finale - 5 octobre 2025*
