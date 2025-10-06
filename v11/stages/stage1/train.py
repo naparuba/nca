@@ -17,7 +17,7 @@ class Stage1Config(StageConfig):
             stage_id=1,
             name="Sans obstacles",
             description="Apprentissage de base de la diffusion sans obstacles",
-            epochs_ratio=0.167,  # Ajusté pour répartition équilibrée entre 6 stages
+            epochs_ratio=0.2,  # Réduit de 0.3 à 0.2
             convergence_threshold=0.0002,
             learning_rate_multiplier=1.0,
             min_obstacles=0,

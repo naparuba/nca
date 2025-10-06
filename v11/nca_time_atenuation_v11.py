@@ -1,6 +1,6 @@
 """
-NCA Modulaire v11 - Architecture découplée avec stages modulaires et atténuation temporelle améliorée.
-Évolution de l'architecture v10 avec numérotation mise à jour.
+NCA Modulaire v11 - Architecture découplée avec stages modulaires.
+Nouvelle architecture permettant l'ajout facile de nouveaux stages.
 """
 
 import torch
@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
-from typing import Tuple, List, Optional, Dict, Any, Union
+from typing import Tuple, List, Optional, Dict, Any
 import os
 import argparse
 import json
@@ -20,7 +20,7 @@ from pathlib import Path
 # Import de l'architecture modulaire
 from stages import ModularStageManager, BaseStage
 
-# Import du module de visualisation v11
+# Import du module de visualisation v9
 from stages.visualizers import create_complete_visualization_suite,get_visualizer
 
 # =============================================================================
@@ -73,7 +73,7 @@ class GlobalConfig:
 def parse_arguments():
     """Parse les arguments de ligne de commande."""
     parser = argparse.ArgumentParser(
-        description='Neural Cellular Automaton - Architecture Modulaire v11',
+        description='Neural Cellular Automaton - Architecture Modulaire v9',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
 
@@ -109,44 +109,19 @@ class ModularDiffusionSimulator:
         self.device = device
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
-             obstacle_mask: torch.Tensor, source_intensity: Optional[Union[float, List[Tuple[Tuple[int, int], float]]]] = None) -> torch.Tensor:
-        """
-        Un pas de diffusion de chaleur avec support intensité variable et sources multiples.
-        
-        Args:
-            grid: Grille actuelle
-            source_mask: Masque des sources
-            obstacle_mask: Masque des obstacles
-            source_intensity: Intensité(s) de la source - peut être:
-                - float: une valeur unique pour toutes les sources
-                - List[Tuple[Tuple[int, int], float]]: liste de tuples (position, intensité) pour chaque source
-        
-        Returns:
-            Nouvelle grille après diffusion
-        """
+             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None) -> torch.Tensor:
+        """Un pas de diffusion de chaleur avec support intensité variable."""
         x = grid.unsqueeze(0).unsqueeze(0)
         new_grid = F.conv2d(x, self.kernel, padding=1).squeeze(0).squeeze(0)
 
-        # Contraintes - les obstacles bloquent la diffusion
+        # Contraintes
         new_grid[obstacle_mask] = 0.0
 
-        # Gestion des sources selon le type de source_intensity
-        if source_intensity is None:
-            # Mode classique - maintenir les valeurs des sources
-            new_grid[source_mask] = grid[source_mask]
-        elif isinstance(source_intensity, (float, int)):
-            # Mode scalaire - une seule intensité pour toutes les sources
+        # Support intensité variable
+        if source_intensity is not None:
             new_grid[source_mask] = source_intensity
         else:
-            # Mode avancé pour Stage 6 - intensités multiples spécifiées par position
-            # Création d'une grille d'intensités sources pour permettre le cumul
-            source_grid = torch.zeros_like(new_grid)
-            for (i, j), intensity in source_intensity:
-                source_grid[i, j] += intensity  # Addition des intensités pour permettre le cumul
-            
-            # Application des intensités cumulées aux positions des sources
-            source_positions = source_grid > 0
-            new_grid[source_positions] = source_grid[source_positions]
+            new_grid[source_mask] = grid[source_mask]
 
         return new_grid
 
@@ -216,40 +191,6 @@ class ModularDiffusionSimulator:
 
         return sequence, source_mask, obstacle_mask, used_intensity
 
-    def generate_stage_sequence(self, stage_id: int, n_steps: int, size: int,
-                              seed: Optional[int] = None,
-                              source_intensity: Optional[float] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor, float]:
-        """
-        Génère une séquence adaptée à un stage spécifique identifié par son ID.
-        Méthode de compatibilité pour la suite de visualisation complète.
-
-        Args:
-            stage_id: ID du stage (1, 2, 3, 4, 5 ou 6)
-            n_steps: Nombre d'étapes de simulation
-            size: Taille de la grille
-            seed: Graine pour la reproductibilité
-            source_intensity: Intensité spécifique (None = intensité standard)
-
-        Returns:
-            (séquence, masque_source, masque_obstacles, intensité_utilisée)
-        """
-        from stages import ModularStageManager
-        from stages.base_stage import BaseStage
-
-        # Création d'une instance temporaire du gestionnaire de stages
-        stage_manager = ModularStageManager(device=self.device)
-        
-        # Récupération du stage correspondant à l'ID
-        if stage_id not in stage_manager.active_stages:
-            stage_id_to_use = min(stage_manager.active_stages.keys())
-            print(f"⚠️ Stage {stage_id} non disponible, utilisation du stage {stage_id_to_use} à la place")
-            stage_id = stage_id_to_use
-            
-        stage = stage_manager.active_stages[stage_id]
-        
-        # Utilisation de la méthode existante avec l'instance du stage
-        return self.generate_sequence_with_stage(stage, n_steps, size, source_intensity, seed)
-
 
 # =============================================================================
 # Modèle NCA (inchangé)
@@ -309,7 +250,7 @@ class ModularNCAUpdater:
                            f"use_temporal_feature={self.use_temporal_feature}")
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
-             obstacle_mask: torch.Tensor, source_intensity: Optional[Union[float, List[Tuple[Tuple[int, int], float]]]] = None,
+             obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None,
              time_step: Optional[int] = None, max_steps: Optional[int] = None) -> torch.Tensor:
         """
         Application du NCA avec support intensité variable et information temporelle.
@@ -318,9 +259,7 @@ class ModularNCAUpdater:
             grid: Grille actuelle
             source_mask: Masque de la source
             obstacle_mask: Masque des obstacles
-            source_intensity: Intensité(s) de la source - peut être:
-                - float: une valeur unique pour toutes les sources
-                - List[Tuple[Tuple[int, int], float]]: liste de tuples (position, intensité) pour chaque source
+            source_intensity: Intensité de la source (optionnel)
             time_step: Pas de temps actuel (optionnel)
             max_steps: Nombre total de pas de temps (optionnel)
             
@@ -366,24 +305,10 @@ class ModularNCAUpdater:
 
         # Contraintes finales
         new_grid[obstacle_mask] = 0.0
-        
-        # Gestion des sources selon le type de source_intensity
-        if source_intensity is None:
-            # Mode classique - maintenir les valeurs des sources
-            new_grid[source_mask] = grid[source_mask]
-        elif isinstance(source_intensity, (float, int)):
-            # Mode scalaire - une seule intensité pour toutes les sources
+        if source_intensity is not None:
             new_grid[source_mask] = source_intensity
         else:
-            # Mode avancé pour Stage 6 - intensités multiples spécifiées par position
-            # Création d'une grille d'intensités sources pour permettre le cumul
-            source_grid = torch.zeros_like(new_grid)
-            for (i, j), intensity in source_intensity:
-                source_grid[i, j] += intensity  # Addition des intensités pour permettre le cumul
-            
-            # Application des intensités cumulées aux positions des sources
-            source_positions = source_grid > 0
-            new_grid[source_positions] = source_grid[source_positions]
+            new_grid[source_mask] = grid[source_mask]
 
         return new_grid
 
@@ -563,44 +488,14 @@ class ModularTrainer:
         return self.stage_manager.execute_full_curriculum(self.train_stage_callback)
 
     def save_stage_checkpoint(self, stage_id: int):
-        """
-        Sauvegarde un modèle complet pour le stage actuel.
-        Le modèle inclut l'état du modèle, l'optimiseur et les métadonnées.
-        """
-        stage = self.stage_manager.active_stages.get(stage_id)
-        if not stage:
-            print(f"⚠️ Impossible de sauvegarder le modèle pour le stage {stage_id} : stage non trouvé")
-            return
-            
+        """Sauvegarde le checkpoint d'un stage."""
+        model_state = {
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+        }
+        
         output_dir = Path(self.config.OUTPUT_DIR)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Chemin pour le modèle complet du stage
-        model_path = output_dir / f"stage_{stage_id}_model.pth"
-        
-        # Création des métriques du stage pour inclusion dans le modèle
-        stage_metrics = {}
-        if hasattr(stage, 'get_statistics'):
-            stage_metrics = stage.get_statistics()
-        
-        # Sauvegarde du modèle complet avec métadonnées
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'stage_id': stage_id,
-            'stage_name': stage.config.name,
-            'stage_metrics': stage_metrics,
-            'config': {k: v for k, v in self.config.__dict__.items() if not k.startswith('_')}
-        }, model_path)
-        
-        print(f"📁 Modèle stage {stage_id} sauvegardé dans {model_path}")
-        
-        # Sauvegarde également du checkpoint standard pour compatibilité
-        checkpoint_path = output_dir / f"stage_{stage_id}_checkpoint.pth"
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-        }, checkpoint_path)
+        self.stage_manager.save_stage_checkpoint(stage_id, model_state, output_dir)
 
     def generate_stage_visualizations(self, vis_seed: int) -> None:
         """
@@ -986,7 +881,7 @@ class ModularTrainer:
 def main():
     """Fonction principale avec architecture modulaire."""
     print(f"\n" + "="*80)
-    print(f"🚀 NEURAL CELLULAR AUTOMATON - ARCHITECTURE MODULAIRE v11")
+    print(f"🚀 NEURAL CELLULAR AUTOMATON - ARCHITECTURE MODULAIRE v9")
     print(f"="*80)
 
     try:
