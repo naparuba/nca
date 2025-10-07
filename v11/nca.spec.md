@@ -1,4 +1,4 @@
-# Spécifications Complètes - NCA Modulaire v11
+# Spécifications Complètes - NCA Modulaire v10
 ## Architecture Découplée avec Stages Extensibles et Atténuation Temporelle
 
 *Version mise à jour - 5 octobre 2025*

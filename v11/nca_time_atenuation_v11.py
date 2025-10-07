@@ -1,5 +1,5 @@
 """
-NCA Modulaire v11 - Architecture découplée avec stages modulaires.
+NCA Modulaire v9 - Architecture découplée avec stages modulaires.
 Nouvelle architecture permettant l'ajout facile de nouveaux stages.
 """
 
@@ -65,9 +65,34 @@ class GlobalConfig:
         # Optimisations
         self.USE_OPTIMIZATIONS = True
         self.USE_VECTORIZED_PATCHES = True
+        
+        # Paramètre de compatibilité pour les visualisations
+        self.DEFAULT_SOURCE_INTENSITY = 1.0
 
         # Configuration optionnelle de séquence personnalisée
         # self.CUSTOM_STAGE_SEQUENCE = [1, 2, 3, 4]  # Si on veut personnaliser
+    
+    def get_convergence_threshold(self, stage_number: int, stage_manager) -> float:
+        """
+        Récupère le seuil de convergence d'un stage depuis sa configuration.
+        Évite la duplication en utilisant directement les seuils définis dans les stages.
+        """
+        if stage_manager is None:
+            return 0.05  # Valeur par défaut de fallback
+        
+        sequence = stage_manager.sequence.get_sequence()
+        stage_index = stage_number - 1
+        
+        if stage_index < 0 or stage_index >= len(sequence):
+            return 0.05  # Valeur par défaut de fallback
+        
+        stage_slug = sequence[stage_index]
+        
+        if stage_slug in stage_manager.active_stages:
+            stage = stage_manager.active_stages[stage_slug]
+            return stage.config.convergence_threshold
+        
+        return 0.05  # Valeur par défaut de fallback
 
 
 def parse_arguments():
@@ -107,6 +132,12 @@ class ModularDiffusionSimulator:
     def __init__(self, device: str):
         self.kernel = torch.ones((1, 1, 3, 3), device=device) / 9.0
         self.device = device
+        # Référence au gestionnaire de stages (sera définie lors de l'initialisation du trainer)
+        self.stage_manager = None
+
+    def set_stage_manager(self, stage_manager):
+        """Définit la référence au gestionnaire de stages."""
+        self.stage_manager = stage_manager
 
     def step(self, grid: torch.Tensor, source_mask: torch.Tensor,
              obstacle_mask: torch.Tensor, source_intensity: Optional[float] = None) -> torch.Tensor:
@@ -124,6 +155,44 @@ class ModularDiffusionSimulator:
             new_grid[source_mask] = grid[source_mask]
 
         return new_grid
+
+    def generate_stage_sequence(self, stage: int, n_steps: int, size: int,
+                              source_intensity: Optional[float] = None,
+                              seed: Optional[int] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor, float]:
+        """
+        Méthode de compatibilité pour les visualiseurs.
+        Accepte un numéro de stage au lieu d'un objet stage.
+        
+        Args:
+            stage: Numéro du stage (entier, 1-indexé)
+            n_steps: Nombre d'étapes de simulation
+            size: Taille de la grille
+            source_intensity: Intensité spécifique (optionnel)
+            seed: Graine pour la reproductibilité (optionnel)
+            
+        Returns:
+            (séquence, masque_source, masque_obstacles, intensité_utilisée)
+        """
+        if self.stage_manager is None:
+            raise RuntimeError("Stage manager non défini. Appelez set_stage_manager() d'abord.")
+        
+        # Utiliser la séquence existante du stage manager au lieu de dupliquer
+        sequence = self.stage_manager.sequence.get_sequence()
+        
+        # Conversion 1-indexé vers 0-indexé pour accéder à la liste
+        stage_index = stage - 1
+        
+        if stage_index < 0 or stage_index >= len(sequence):
+            raise ValueError(f"Stage {stage} non valide. Stages disponibles: 1-{len(sequence)} correspondant à {sequence}")
+        
+        stage_slug = sequence[stage_index]
+        
+        if stage_slug not in self.stage_manager.active_stages:
+            raise ValueError(f"Stage '{stage_slug}' non actif dans le gestionnaire de stages")
+        
+        # Récupération de l'objet stage et délégation à la méthode principale
+        stage_obj = self.stage_manager.active_stages[stage_slug]
+        return self.generate_sequence_with_stage(stage_obj, n_steps, size, source_intensity, seed)
 
     def generate_sequence_with_stage(self, stage: BaseStage, n_steps: int, size: int,
                                    source_intensity: Optional[float] = None,
@@ -335,6 +404,12 @@ class ModularTrainer:
 
         # Gestionnaire de stages modulaire
         self.stage_manager = ModularStageManager(global_config, self.device)
+        
+        # Connexion du gestionnaire de stages au simulateur pour la compatibilité
+        self.simulator.set_stage_manager(self.stage_manager)
+        
+        # Connexion du gestionnaire de stages à la configuration pour les seuils de convergence
+        self.config.stage_manager = self.stage_manager
 
     def train_stage_callback(self, stage: BaseStage, max_epochs: int, early_stopping: bool = True) -> Dict[str, Any]:
         """
@@ -460,7 +535,7 @@ class ModularTrainer:
             total_loss = total_loss + mse_loss
             
             # Pour Stage 5: ajouter une perte de cohérence temporelle
-            if t_step > 0 and loss_weights.get('temporal_consistency', 0.0) > 0 and hasattr(stage, 'config') and stage.config.stage_id == 5:
+            if t_step > 0 and loss_weights.get('temporal_consistency', 0.0) > 0 and hasattr(stage, 'config') and stage.config.name == 'time_attenuation':
                 # Cette perte incite le modèle à maintenir une cohérence dans l'évolution temporelle
                 # Sans lui donner directement l'information temporelle
                 last_target_delta = target_sequence[t_step][source_mask] - target_sequence[t_step-1][source_mask]
@@ -487,7 +562,7 @@ class ModularTrainer:
         """Exécute le curriculum complet via le gestionnaire de stages."""
         return self.stage_manager.execute_full_curriculum(self.train_stage_callback)
 
-    def save_stage_checkpoint(self, stage_id: int):
+    def save_stage_checkpoint(self, slug: str):
         """Sauvegarde le checkpoint d'un stage."""
         model_state = {
             'model_state_dict': self.model.state_dict(),
@@ -495,7 +570,7 @@ class ModularTrainer:
         }
         
         output_dir = Path(self.config.OUTPUT_DIR)
-        self.stage_manager.save_stage_checkpoint(stage_id, model_state, output_dir)
+        self.stage_manager.save_stage_checkpoint(slug, model_state, output_dir)
 
     def generate_stage_visualizations(self, vis_seed: int) -> None:
         """
@@ -506,38 +581,38 @@ class ModularTrainer:
         """
         print(f"🎨 Génération des visualisations pour les stages...")
         
-        # Import direct des visualiseurs spécialisés - sans failback silencieux
+        # Import direct des visualiseurs spécialisés
         from stages.visualizers import get_visualizer
         print(f"  ✓ Visualiseurs spécialisés chargés")
         
         # Configuration matplotlib
         matplotlib.use('Agg')  # Mode non-interactif pour sauvegarde
         
-        # Données pour visualisations multi-intensités du Stage 4
-        stage4_intensity_data = {}
+        # Données pour visualisations multi-intensités de variable_intensity
+        variable_intensity_data = {}
         
         # Affichage des stages actifs pour le débogage
-        print(f"🔍 Séquence de stages: {self.stage_manager.stage_sequence}")
+        print(f"🔍 Séquence de stages: {self.stage_manager.sequence.get_sequence()}")
         print(f"🔍 Stages actifs: {list(self.stage_manager.active_stages.keys())}")
         
-        for stage_id in self.stage_manager.stage_sequence:
-            if stage_id in self.stage_manager.active_stages:
-                stage = self.stage_manager.active_stages[stage_id]
-                print(f"  🎨 Visualisations pour Stage {stage_id} ({stage.config.name})...")
+        for slug in self.stage_manager.sequence.get_sequence():
+            if slug in self.stage_manager.active_stages:
+                stage = self.stage_manager.active_stages[slug]
+                print(f"  🎨 Visualisations pour Stage '{slug}' ({stage.config.description})...")
                 
                 # Création du répertoire du stage
-                stage_dir = Path(self.config.OUTPUT_DIR) / f"stage_{stage_id}"
+                stage_dir = Path(self.config.OUTPUT_DIR) / f"stage_{slug}"
                 stage_dir.mkdir(parents=True, exist_ok=True)
                 
                 # Récupération du visualiseur spécialisé si disponible
-                specialized_visualizer = get_visualizer(stage_id)
-                print(f"    🔍 Type de visualiseur obtenu pour Stage {stage_id}: {type(specialized_visualizer)}")
+                specialized_visualizer = get_visualizer(slug)
+                print(f"    🔍 Type de visualiseur obtenu pour '{slug}': {type(specialized_visualizer)}")
                 
                 # Génération de la visualisation principale
                 torch.manual_seed(vis_seed)
                 np.random.seed(vis_seed)
                 
-                # Gestion spéciale pour Stage 4 (intensités variables)
+                # Gestion spéciale pour variable_intensity (intensités variables)
                 if hasattr(stage, 'sample_source_intensity'):
                     source_intensity = stage.sample_source_intensity(0.5)  # Milieu de progression
                 else:
@@ -557,15 +632,15 @@ class ModularTrainer:
                 nca_sequence.append(grid_pred.clone())
                 
                 with torch.no_grad():
-                    # Gestion spéciale pour Stage 5 (intensité variable dans le temps)
-                    is_stage5 = hasattr(stage, 'initialize_temporal_sequence')
-                    if is_stage5:
+                    # Gestion spéciale pour time_attenuation (intensité variable dans le temps)
+                    is_time_attenuation = hasattr(stage, 'initialize_temporal_sequence')
+                    if is_time_attenuation:
                         # Initialisation d'une nouvelle séquence temporelle pour les prédictions NCA
                         sequence_id = stage.initialize_temporal_sequence(0.5, self.config.POSTVIS_STEPS + 1)
                         
                     for step in range(self.config.POSTVIS_STEPS):
-                        # Utilisation de l'intensité atténuée pour Stage 5
-                        if is_stage5:
+                        # Utilisation de l'intensité atténuée pour time_attenuation
+                        if is_time_attenuation:
                             current_intensity = stage.get_source_intensity_at_step(step + 1)
                             grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask, current_intensity)
                         else:
@@ -578,26 +653,26 @@ class ModularTrainer:
                 
                 # Utilisation du visualiseur spécialisé si disponible
                 if specialized_visualizer:
-                    # Récupération d'informations supplémentaires pour le Stage 4
+                    # Récupération d'informations supplémentaires pour variable_intensity
                     intensity_history = None
-                    if stage_id == 4 and hasattr(stage, 'intensity_manager'):
+                    if slug == 'variable_intensity' and hasattr(stage, 'intensity_manager'):
                         try:
                             intensity_history = stage.intensity_manager.intensity_history
                         except:
                             pass
                     
                     # Création des visualisations spécialisées
-                    print(f"    🎨 Utilisation du visualiseur spécialisé pour Stage {stage_id}")
+                    print(f"    🎨 Utilisation du visualiseur spécialisé pour '{slug}'")
                     specialized_visualizer.create_visualizations(
                         stage_dir, target_seq, nca_sequence,
                         obstacle_mask, source_mask, used_intensity,
-                        vis_seed, intensity_history if stage_id == 4 else None
+                        vis_seed, intensity_history if slug == 'variable_intensity' else None
                     )
                     
-                    # Stockage des données pour visualisation multi-intensités du Stage 4
-                    if stage_id == 4:
+                    # Stockage des données pour visualisation multi-intensités de variable_intensity
+                    if slug == 'variable_intensity':
                         # Stockage des données principales
-                        stage4_intensity_data[used_intensity] = {
+                        variable_intensity_data[used_intensity] = {
                             'target_sequence': [t.detach().cpu().numpy() for t in target_seq],
                             'nca_sequence': [t.detach().cpu().numpy() for t in nca_sequence],
                             'source_mask': source_mask.detach().cpu().numpy(),
@@ -605,18 +680,18 @@ class ModularTrainer:
                         }
                 else:
                     # Utilisation du visualiseur générique
-                    print(f"    🎨 Utilisation du visualiseur générique pour Stage {stage_id}")
+                    print(f"    🎨 Utilisation du visualiseur générique pour '{slug}'")
                     self._create_stage_animations(
-                        stage_id, stage_dir, target_seq, nca_sequence,
+                        slug, stage_dir, target_seq, nca_sequence,
                         obstacle_mask, used_intensity, suffix=""
                     )
                     self._create_stage_convergence_plot(
-                        stage_id, stage_dir, target_seq, nca_sequence, vis_seed, suffix=""
+                        slug, stage_dir, target_seq, nca_sequence, vis_seed, suffix=""
                     )
                 
-                # NOUVEAU : Visualisations supplémentaires pour Stage 4
-                if stage_id == 4 and hasattr(stage, 'sample_source_intensity'):
-                    print(f"    🎨 Visualisations supplémentaires pour Stage 4 avec intensités fixes...")
+                # NOUVEAU : Visualisations supplémentaires pour variable_intensity
+                if slug == 'variable_intensity' and hasattr(stage, 'sample_source_intensity'):
+                    print(f"    🎨 Visualisations supplémentaires pour '{slug}' avec intensités fixes...")
                     
                     # Intensités supplémentaires à tester
                     additional_intensities = [0.25, 0.5]
@@ -625,7 +700,7 @@ class ModularTrainer:
                         print(f"      🔸 Génération avec intensité {intensity}...")
                         
                         # Génération avec intensité fixe
-                        torch.manual_seed(vis_seed + int(intensity * 100))  # Seed légèrement différent
+                        torch.manual_seed(vis_seed + int(intensity * 100))
                         np.random.seed(vis_seed + int(intensity * 100))
                         
                         target_seq_fixed, source_mask_fixed, obstacle_mask_fixed, _ = \
@@ -648,8 +723,8 @@ class ModularTrainer:
                                 nca_sequence_fixed.append(grid_pred_fixed.clone())
                         
                         # Stockage des données pour visualisation comparative
-                        if specialized_visualizer and stage_id == 4:
-                            stage4_intensity_data[intensity] = {
+                        if specialized_visualizer and slug == 'variable_intensity':
+                            variable_intensity_data[intensity] = {
                                 'target_sequence': [t.detach().cpu().numpy() for t in target_seq_fixed],
                                 'nca_sequence': [t.detach().cpu().numpy() for t in nca_sequence_fixed],
                                 'source_mask': source_mask_fixed.detach().cpu().numpy(),
@@ -675,20 +750,20 @@ class ModularTrainer:
                             # Utilisation du visualiseur générique
                             intensity_suffix = f"_intensity_{intensity:.2f}".replace(".", "")
                             self._create_stage_animations(
-                                stage_id, stage_dir, target_seq_fixed, nca_sequence_fixed,
+                                slug, stage_dir, target_seq_fixed, nca_sequence_fixed,
                                 obstacle_mask_fixed, intensity, suffix=intensity_suffix
                             )
                             self._create_stage_convergence_plot(
-                                stage_id, stage_dir, target_seq_fixed, nca_sequence_fixed,
+                                slug, stage_dir, target_seq_fixed, nca_sequence_fixed,
                                 vis_seed, suffix=intensity_suffix
                             )
                 
                 self.model.train()
                 
-                # Création des visualisations comparatives pour Stage 4
-                if stage_id == 4 and specialized_visualizer and len(stage4_intensity_data) > 1:
-                    intensities = sorted(stage4_intensity_data.keys())
-                    vis_data_list = [stage4_intensity_data[i] for i in intensities]
+                # Création des visualisations comparatives pour variable_intensity
+                if slug == 'variable_intensity' and specialized_visualizer and len(variable_intensity_data) > 1:
+                    intensities = sorted(variable_intensity_data.keys())
+                    vis_data_list = [variable_intensity_data[i] for i in intensities]
                     
                     print(f"    🎨 Création des visualisations comparatives entre intensités...")
                     specialized_visualizer._create_intensity_comparison_plot(
@@ -698,7 +773,7 @@ class ModularTrainer:
                         stage_dir, intensities, vis_data_list
                     )
                 
-                print(f"    ✅ Visualisations Stage {stage_id} sauvegardées dans {stage_dir}")
+                print(f"    ✅ Visualisations Stage '{slug}' sauvegardées dans {stage_dir}")
     
     def _create_stage_animations(self, stage_id: int, stage_dir: Path,
                                 target_seq: List[torch.Tensor], nca_seq: List[torch.Tensor],
@@ -812,23 +887,23 @@ class ModularTrainer:
         plt.close()
 
     def generate_complete_visualization_suite(self, results: Dict[str, Any]):
-        """Génère la suite complète de visualisations après l'entraînement."""
+        """
+        Génère la suite complète de visualisations après l'entraînement.
+        
+        Si quelque chose échoue, l'exception est levée directement.
+        Pas de try/except pour masquer les erreurs.
+        """
         print(f"🎨 Génération de la suite complète de visualisations...")
         
-        try:
-            # Préparation des métriques pour la suite de visualisations
-            adapted_results = self._adapt_results_for_visualization(results)
-            
-            # Appel de la suite de visualisation complète
-            create_complete_visualization_suite(
-                self.model, adapted_results, self.simulator, self.config
-            )
-            
-            print(f"✅ Suite complète de visualisations générée")
-            
-        except Exception as e:
-            print(f"⚠️  Erreur lors de la génération de la suite complète: {e}")
-            print(f"   Les visualisations par stage sont disponibles")
+        # Préparation des métriques pour la suite de visualisations
+        adapted_results = self._adapt_results_for_visualization(results)
+        
+        # Appel de la suite de visualisation complète
+        create_complete_visualization_suite(
+            self.model, adapted_results, self.simulator, self.config
+        )
+        
+        print(f"✅ Suite complète de visualisations générée")
     
     def _adapt_results_for_visualization(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Adapte les résultats pour la compatibilité avec le système de visualisation."""

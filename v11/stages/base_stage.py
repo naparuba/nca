@@ -11,9 +11,13 @@ from dataclasses import dataclass
 
 @dataclass
 class StageConfig:
-    """Configuration de base pour un stage d'entraînement."""
-    stage_id: int
-    name: str
+    """
+    Configuration de base pour un stage d'entraînement.
+    
+    Le 'name' sert maintenant d'identifiant unique (slug) pour le stage.
+    Plus besoin de stage_id - le découplage est total.
+    """
+    name: str  # Slug unique du stage (ex: 'no_obstacles', 'single_obstacle')
     description: str
     epochs_ratio: float = 0.25  # Ratio par défaut des époques totales
     convergence_threshold: float = 0.0002
@@ -30,6 +34,9 @@ class StageConfig:
             raise ValueError(f"epochs_ratio doit être entre 0 et 1, reçu: {self.epochs_ratio}")
         if self.convergence_threshold <= 0:
             raise ValueError(f"convergence_threshold doit être > 0, reçu: {self.convergence_threshold}")
+        # Validation que name est un slug valide (sans espaces, minuscules, underscores)
+        if not self.name.replace('_', '').isalnum() or ' ' in self.name:
+            raise ValueError(f"Le name doit être un slug valide (lettres, chiffres, underscores): {self.name}")
 
 
 class BaseStage(ABC):
@@ -142,7 +149,7 @@ class BaseStage(ABC):
         """Retourne un résumé des performances du stage."""
         if not self.training_history['losses']:
             return {
-                'stage_id': self.config.stage_id,
+                'stage_id': self.config.name,
                 'name': self.config.name,
                 'epochs_trained': 0,
                 'final_loss': float('inf'),
@@ -150,7 +157,7 @@ class BaseStage(ABC):
             }
         
         return {
-            'stage_id': self.config.stage_id,
+            'stage_id': self.config.name,
             'name': self.config.name,
             'epochs_trained': len(self.training_history['losses']),
             'final_loss': self.training_history['losses'][-1],

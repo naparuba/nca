@@ -48,3 +48,7 @@ Tu es également un spécialiste en développement d’intelligence artificielle
 - Tu dois ensuite préciser les modifications que tu prévois de faire, et pourquoi
 - Tu dois ensuite décrire les modifications prévues, en te concentrant sur les points problématiques
 - Evidement les spécifications doivent être validées par l'utilisateur avant de commencer le développement, et être écrites en FRANCAIS
+
+
+## PYTHON
+- tu dois éviter les exports d'imports style __all__ = ['A', 'B'] sauf si c'est STRICTEMENT nécessaire, car ça alourdi les choses pour rien

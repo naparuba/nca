@@ -1,6 +1,9 @@
 """
-Stage 1 : Apprentissage sans obstacles.
+Stage : Apprentissage sans obstacles (no_obstacles).
 Stage de base pour l'apprentissage de la diffusion pure.
+
+Ce stage ne connaît PAS son numéro dans la séquence.
+Il est identifié uniquement par son slug 'no_obstacles'.
 """
 
 import torch
@@ -9,15 +12,14 @@ from ..base_stage import BaseStage, StageConfig
 from ..environment_generator import EnvironmentGenerator
 
 
-class Stage1Config(StageConfig):
-    """Configuration spécialisée pour le Stage 1."""
+class NoObstaclesConfig(StageConfig):
+    """Configuration pour le stage sans obstacles."""
     
     def __init__(self):
         super().__init__(
-            stage_id=1,
-            name="Sans obstacles",
+            name="no_obstacles",  # Slug unique - identifiant du stage
             description="Apprentissage de base de la diffusion sans obstacles",
-            epochs_ratio=0.2,  # Réduit de 0.3 à 0.2
+            epochs_ratio=0.2,
             convergence_threshold=0.0002,
             learning_rate_multiplier=1.0,
             min_obstacles=0,
@@ -25,21 +27,23 @@ class Stage1Config(StageConfig):
         )
 
 
-class Stage1(BaseStage):
+class NoObstaclesStage(BaseStage):
     """
-    Stage 1 : Apprentissage sans obstacles.
+    Stage d'apprentissage sans obstacles.
     Le plus simple des stages, sert de base pour les suivants.
+    
+    Ce stage apprend au NCA à diffuser la chaleur/lumière
+    dans un environnement vide, sans aucun obstacle.
     """
     
     def __init__(self, device: str = "cpu"):
-        config = Stage1Config()
+        config = NoObstaclesConfig()
         super().__init__(config, device)
     
     def generate_environment(self, size: int, source_pos: Tuple[int, int],
                            seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement vide (aucun obstacle).
-        Utilise l'EnvironmentGenerator pour la factorisation.
         
         Args:
             size: Taille de la grille
@@ -47,15 +51,18 @@ class Stage1(BaseStage):
             seed: Graine pour la reproductibilité (non utilisée ici)
             
         Returns:
-            Masque d'obstacles vide
+            Masque d'obstacles vide (tous les pixels à False)
         """
         env_generator = EnvironmentGenerator(self.device)
         return env_generator.generate_empty_environment(size)
     
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]:
         """
-        Prépare les données d'entraînement pour le Stage 1.
+        Prépare les données d'entraînement pour ce stage.
         
+        Args:
+            global_config: Configuration globale du système
+            
         Returns:
             Paramètres d'entraînement optimisés pour l'apprentissage de base
         """
@@ -70,7 +77,7 @@ class Stage1(BaseStage):
     def validate_convergence(self, recent_losses: List[float],
                            epoch_in_stage: int) -> bool:
         """
-        Critères de convergence pour le Stage 1.
+        Critères de convergence pour ce stage.
         Convergence stricte requise car c'est la base.
         
         Args:
@@ -78,7 +85,7 @@ class Stage1(BaseStage):
             epoch_in_stage: Époque courante dans le stage
             
         Returns:
-            True si convergé
+            True si le stage a convergé
         """
         # Minimum 15 époques pour stabiliser
         if epoch_in_stage < 15 or len(recent_losses) < 10:
@@ -99,7 +106,12 @@ class Stage1(BaseStage):
         return converged and stable
     
     def get_loss_weights(self) -> Dict[str, float]:
-        """Poids des pertes pour le Stage 1."""
+        """
+        Poids des pertes pour ce stage.
+        
+        Returns:
+            Dictionnaire avec les poids de chaque composante de perte
+        """
         return {
             'mse': 1.0,
             'convergence': 2.0,  # Accent sur la convergence
@@ -108,10 +120,17 @@ class Stage1(BaseStage):
     
     def post_epoch_hook(self, epoch_in_stage: int, loss: float,
                        metrics: Dict[str, Any]) -> None:
-        """Hook post-époque pour le Stage 1."""
+        """
+        Hook appelé après chaque époque d'entraînement.
+        
+        Args:
+            epoch_in_stage: Numéro d'époque dans ce stage
+            loss: Valeur de la perte
+            metrics: Métriques additionnelles
+        """
         super().post_epoch_hook(epoch_in_stage, loss, metrics)
         
-        # Métriques spécifiques au Stage 1
+        # Métriques spécifiques à ce stage
         stage_metrics = {
             'convergence_progress': max(0, 1 - loss / self.config.convergence_threshold),
             'stability_score': self._calculate_stability_score()
@@ -123,7 +142,12 @@ class Stage1(BaseStage):
             self.training_history['metrics'][key].append(value)
     
     def _calculate_stability_score(self) -> float:
-        """Calcule un score de stabilité basé sur les pertes récentes."""
+        """
+        Calcule un score de stabilité basé sur les pertes récentes.
+        
+        Returns:
+            Score entre 0 et 1 (1 = très stable)
+        """
         if len(self.training_history['losses']) < 5:
             return 0.0
         
@@ -132,4 +156,5 @@ class Stage1(BaseStage):
         variance = sum((x - mean_loss)**2 for x in recent_losses) / len(recent_losses)
         
         # Score inversement proportionnel à la variance
-        return max(0, 1 - variance * 1000)  # Normalisé approximativement
+        return max(0, 1 - variance * 1000)
+

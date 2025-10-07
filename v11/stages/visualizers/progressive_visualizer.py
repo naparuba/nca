@@ -210,8 +210,8 @@ class ProgressiveVisualizer:
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(errors, 'b-', linewidth=2, label='Erreur MSE')
         
-        # Seuil de convergence adaptatif
-        threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
+        # Seuil de convergence - utilise la nouvelle méthode au lieu de l'attribut dupliqué
+        threshold = cfg.get_convergence_threshold(stage, getattr(cfg, 'stage_manager', None))
         ax.axhline(y=threshold, color='r', linestyle='--',
                   label=f'Seuil convergence étape {stage}')
         
@@ -343,10 +343,10 @@ class ProgressiveVisualizer:
                             label=f'Étape {stage} ({stage_names[stage]})',
                             linewidth=2)
             
-            # Seuils de convergence
+            # Seuils de convergence - utilise la nouvelle méthode au lieu de l'attribut dupliqué
             for stage in [1, 2, 3, 4]:
-                if stage in cfg.CONVERGENCE_THRESHOLDS:
-                    threshold = cfg.CONVERGENCE_THRESHOLDS[stage]
+                threshold = cfg.get_convergence_threshold(stage, getattr(cfg, 'stage_manager', None))
+                if threshold != 0.05:  # Seulement si différent de la valeur par défaut
                     ax1.axhline(y=threshold, color=stage_colors[stage],
                                linestyle='--', alpha=0.7,
                                label=f'Seuil étape {stage}')
@@ -446,7 +446,7 @@ class ProgressiveVisualizer:
             for stage in stages:
                 if stage in metrics['stage_metrics'] and 'loss_history' in metrics['stage_metrics'][stage]:
                     stage_losses = metrics['stage_metrics'][stage]['loss_history']
-                    threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
+                    threshold = cfg.get_convergence_threshold(stage, getattr(cfg, 'stage_manager', None))
                     
                     convergence_epoch = None
                     for i, loss in enumerate(stage_losses):

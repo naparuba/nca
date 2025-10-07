@@ -1,155 +1,75 @@
 """
 Gestionnaire de stages modulaire pour le NCA.
 Orchestre l'exécution des stages de manière découplée et extensible.
+
+REFACTORING v11:
+- Utilise StageAutoRegistry pour l'auto-découverte des stages
+- Utilise StageSequence pour définir l'ordre d'exécution
+- Plus de couplage avec les numéros de stages
+- Identification par slug uniquement
 """
 
-from typing import Dict, Any, List, Optional, Type
-import torch
+from typing import Dict, Any, List, Optional
 import json
 from pathlib import Path
 
 from .base_stage import BaseStage
-from .stage1 import Stage1
-from .stage2 import Stage2
-from .stage3 import Stage3
-from .stage4 import Stage4
-from .stage5 import Stage5
-
-
-class StageRegistry:
-    """
-    Registre des stages disponibles.
-    Facilite l'ajout de nouveaux stages sans modification du code existant.
-    """
-    
-    def __init__(self):
-        self._stages: Dict[int, Type[BaseStage]] = {}
-        self._register_default_stages()
-    
-    def _register_default_stages(self):
-        """Enregistre les stages par défaut."""
-        self.register_stage(1, Stage1)
-        self.register_stage(2, Stage2)
-        self.register_stage(3, Stage3)
-        self.register_stage(4, Stage4)
-        self.register_stage(5, Stage5)
-    
-    def register_stage(self, stage_id: int, stage_class: Type[BaseStage]):
-        """
-        Enregistre un nouveau stage.
-        
-        Args:
-            stage_id: Identifiant unique du stage
-            stage_class: Classe du stage à enregistrer
-        """
-        if not issubclass(stage_class, BaseStage):
-            raise ValueError(f"Stage class must inherit from BaseStage")
-        
-        self._stages[stage_id] = stage_class
-        print(f"✅ Stage {stage_id} ({stage_class.__name__}) enregistré")
-    
-    def get_stage_class(self, stage_id: int) -> Type[BaseStage]:
-        """Récupère la classe d'un stage par son ID."""
-        if stage_id not in self._stages:
-            raise ValueError(f"Stage {stage_id} non trouvé dans le registre")
-        return self._stages[stage_id]
-    
-    def list_available_stages(self) -> List[int]:
-        """Liste les IDs des stages disponibles."""
-        return sorted(self._stages.keys())
-    
-    def create_stage(self, stage_id: int, device: str = "cpu", **kwargs) -> BaseStage:
-        """
-        Crée une instance d'un stage.
-        
-        Args:
-            stage_id: ID du stage à créer
-            device: Device PyTorch
-            **kwargs: Arguments supplémentaires pour le constructeur
-            
-        Returns:
-            Instance du stage
-        """
-        stage_class = self.get_stage_class(stage_id)
-        return stage_class(device=device, **kwargs)
+from .registry import StageAutoRegistry
+from .sequence import StageSequence
 
 
 class ModularStageManager:
     """
     Gestionnaire principal des stages modulaires.
-    Orchestre l'exécution séquentielle des stages de manière découplée.
+    Utilise maintenant le système de registry auto-découvert et la séquence configurable.
     """
     
-    def __init__(self, global_config: Any, device: str = "cpu"):
+    def __init__(self, global_config: Any, device: str = "cpu",
+                 custom_sequence: Optional[List[str]] = None):
+        """
+        Initialise le gestionnaire de stages.
+        
+        Args:
+            global_config: Configuration globale du système
+            device: Device PyTorch ('cpu' ou 'cuda')
+            custom_sequence: Séquence personnalisée de slugs (optionnel)
+        """
         self.global_config = global_config
         self.device = device
-        self.registry = StageRegistry()
-        self.active_stages: Dict[int, BaseStage] = {}
+        
+        # 🎯 Nouveau système basé sur registry et séquence
+        self.registry = StageAutoRegistry()
+        self.sequence = StageSequence(custom_sequence)
+        
+        # Stages actifs indexés par SLUG, pas par numéro
+        self.active_stages: Dict[str, BaseStage] = {}
         self.execution_history: List[Dict[str, Any]] = []
         
         # Configuration d'exécution
-        self.stage_sequence = self._determine_stage_sequence()
         self.total_epochs_planned = global_config.TOTAL_EPOCHS
         self.epochs_per_stage = self._calculate_epochs_per_stage()
     
-    def _determine_stage_sequence(self) -> List[int]:
-        """Détermine la séquence d'exécution des stages."""
-        # Par défaut : tous les stages disponibles dans l'ordre
-        available_stages = self.registry.list_available_stages()
-        
-        # Possibilité de personnaliser via la configuration
-        if hasattr(self.global_config, 'CUSTOM_STAGE_SEQUENCE'):
-            sequence = self.global_config.CUSTOM_STAGE_SEQUENCE
-            # Validation
-            for stage_id in sequence:
-                if stage_id not in available_stages:
-                    raise ValueError(f"Stage {stage_id} non disponible")
-            return sequence
-        
-        return available_stages
-    
-    def _validate_stage_ratios(self):
-        """Valide que la somme des ratios d'époques est cohérente."""
-        total_ratio = 0
-        for stage_id in self.stage_sequence:
-            stage_class = self.registry.get_stage_class(stage_id)
-            ratio = stage_class(device=self.device).config.epochs_ratio
-            total_ratio += ratio
-            
-            print(f"  Stage {stage_id}: ratio={ratio:.3f}")
-        
-        # Vérification que le total des ratios est proche de 1.0
-        if not (0.99 <= total_ratio <= 1.01):
-            raise ValueError(f"La somme des ratios d'époques doit être égale à 1.0 (valeur actuelle: {total_ratio:.3f})")
-        
-        print(f"✅ Validation des ratios réussie: somme={total_ratio:.3f}")
-    
-    def _calculate_epochs_per_stage(self) -> Dict[int, int]:
-        """Calcule le nombre d'époques par stage selon leur configuration."""
+    def _calculate_epochs_per_stage(self) -> Dict[str, int]:
+        """
+        Calcule le nombre d'époques par stage selon leur configuration.
+        Utilise maintenant les SLUGS au lieu des numéros.
+        """
         epochs_per_stage = {}
-        
-        # Vérification préalable des ratios
-        self._validate_stage_ratios()
         
         print("\n=== Calcul détaillé de la répartition des époques par stage ===")
         print(f"Nombre total d'époques planifiées: {self.total_epochs_planned}")
         
         # Première passe : calcul basé sur les ratios
-        for stage_id in self.stage_sequence:
-            # Créer temporairement le stage pour récupérer sa config
-            temp_stage = self.registry.create_stage(stage_id, self.device)
+        for slug in self.sequence.get_sequence():
+            temp_stage = self.registry.create_stage(slug, self.device)
             ratio = temp_stage.config.epochs_ratio
             
-            # Calcul du nombre brut d'époques (valeur flottante)
             raw_epochs = self.total_epochs_planned * ratio
-            
-            # Conversion en entier (arrondi vers le bas)
             epochs = int(raw_epochs)
             
-            # Stockage et logs
-            epochs_per_stage[stage_id] = epochs
+            epochs_per_stage[slug] = epochs
             
-            print(f"  Stage {stage_id}: ratio={ratio:.3f}, "
+            print(f"  Stage '{slug}': ratio={ratio:.3f}, "
                   f"calcul={self.total_epochs_planned}*{ratio:.3f}={raw_epochs:.2f}, "
                   f"arrondi={epochs}")
         
@@ -158,65 +78,60 @@ class ModularStageManager:
         print(f"\nSomme initiale des époques: {total_calculated}/{self.total_epochs_planned}")
         
         if total_calculated != self.total_epochs_planned:
-            # Ajuste le dernier stage
-            last_stage = self.stage_sequence[-1]
+            last_slug = self.sequence.get_sequence()[-1]
             adjustment = self.total_epochs_planned - total_calculated
-
-            # Logs avant ajustement
-            print(f"  Ajustement requis: {adjustment} époques")
-            print(f"  Appliqué au dernier stage (Stage {last_stage}): "
-                  f"{epochs_per_stage[last_stage]} → {epochs_per_stage[last_stage] + adjustment}")
             
-            # Application de l'ajustement
-            epochs_per_stage[last_stage] += adjustment
+            print(f"  Ajustement requis: {adjustment} époques")
+            print(f"  Appliqué au dernier stage ('{last_slug}'): "
+                  f"{epochs_per_stage[last_slug]} → {epochs_per_stage[last_slug] + adjustment}")
+            
+            epochs_per_stage[last_slug] += adjustment
         else:
             print("  Aucun ajustement nécessaire, la somme est exacte")
         
         # Vérification finale
         print("\n=== Répartition finale des époques ===")
-        for stage_id in self.stage_sequence:
-            # Alerte visuelle pour les stages sans époques
-            status = "⚠️ AUCUNE ÉPOQUE" if epochs_per_stage[stage_id] == 0 else "✓"
-            print(f"  Stage {stage_id}: {epochs_per_stage[stage_id]} époques {status}")
+        for slug in self.sequence.get_sequence():
+            status = "⚠️ AUCUNE ÉPOQUE" if epochs_per_stage[slug] == 0 else "✓"
+            print(f"  Stage '{slug}': {epochs_per_stage[slug]} époques {status}")
         
         print(f"Total final: {sum(epochs_per_stage.values())}/{self.total_epochs_planned}\n")
         
         return epochs_per_stage
     
-    def initialize_stage(self, stage_id: int) -> BaseStage:
+    def initialize_stage(self, slug: str) -> BaseStage:
         """
-        Initialise un stage spécifique.
+        Initialise un stage spécifique par son slug.
         
         Args:
-            stage_id: ID du stage à initialiser
+            slug: Identifiant unique du stage
             
         Returns:
             Instance du stage initialisé
         """
-        print(f"\n🎯 Initialisation du Stage {stage_id}...")
+        print(f"\n🎯 Initialisation du Stage '{slug}'...")
         
         # Paramètres spécialisés selon le stage et ses capacités
-        stage_class = self.registry.get_stage_class(stage_id)
+        stage_class = self.registry.get_stage(slug)
         stage_kwargs = self._get_stage_kwargs(stage_class)
         
         # Création du stage
-        stage = self.registry.create_stage(stage_id, self.device, **stage_kwargs)
+        stage = self.registry.create_stage(slug, self.device, **stage_kwargs)
         
         # Configuration des données d'entraînement
         training_config = stage.prepare_training_data(self.global_config)
         stage.training_config = training_config
         
         # Stockage dans les stages actifs
-        self.active_stages[stage_id] = stage
+        self.active_stages[slug] = stage
         
-        print(f"✅ Stage {stage_id} ({stage.config.name}) initialisé")
-        print(f"   📋 {stage.config.description}")
-        print(f"   ⏱️  Époques prévues: {self.epochs_per_stage[stage_id]}")
+        print(f"✅ Stage '{slug}' ({stage.config.description}) initialisé")
+        print(f"   ⏱️  Époques prévues: {self.epochs_per_stage[slug]}")
         print(f"   🎯 Seuil convergence: {stage.config.convergence_threshold}")
         
         return stage
     
-    def _get_stage_kwargs(self, stage_class: Type[BaseStage]) -> Dict[str, Any]:
+    def _get_stage_kwargs(self, stage_class) -> Dict[str, Any]:
         """
         Détermine les paramètres à passer au constructeur d'un stage.
         
@@ -228,13 +143,11 @@ class ModularStageManager:
         """
         import inspect
         
-        # Récupération de la signature du constructeur
         sig = inspect.signature(stage_class.__init__)
         param_names = list(sig.parameters.keys())
         
         stage_kwargs = {}
         
-        # Ajout conditionnel des paramètres selon ce que le stage accepte
         if 'min_obstacle_size' in param_names and hasattr(self.global_config, 'MIN_OBSTACLE_SIZE'):
             stage_kwargs['min_obstacle_size'] = self.global_config.MIN_OBSTACLE_SIZE
         
@@ -243,13 +156,13 @@ class ModularStageManager:
         
         return stage_kwargs
     
-    def execute_stage(self, stage_id: int, trainer_callback,
+    def execute_stage(self, slug: str, trainer_callback,
                      early_stopping: bool = True) -> Dict[str, Any]:
         """
-        Exécute un stage spécifique.
+        Exécute un stage spécifique par son slug.
         
         Args:
-            stage_id: ID du stage à exécuter
+            slug: Identifiant unique du stage
             trainer_callback: Fonction callback pour l'entraînement
             early_stopping: Active l'arrêt précoce
             
@@ -259,51 +172,47 @@ class ModularStageManager:
         Raises:
             ValueError: Si le nombre d'époques alloué au stage est zéro
         """
-        if stage_id not in self.active_stages:
-            stage = self.initialize_stage(stage_id)
+        if slug not in self.active_stages:
+            stage = self.initialize_stage(slug)
         else:
-            stage = self.active_stages[stage_id]
+            stage = self.active_stages[slug]
         
-        max_epochs = self.epochs_per_stage[stage_id]
+        max_epochs = self.epochs_per_stage[slug]
         
-        # Nouvelle vérification : s'assurer qu'un stage a au moins une époque d'entraînement
         if max_epochs == 0:
-            raise ValueError(f"Le Stage {stage_id} ({stage.config.name}) a 0 époque allouée. "
+            raise ValueError(f"Le Stage '{slug}' ({stage.config.description}) a 0 époque allouée. "
                            f"Chaque stage doit avoir au moins une époque d'entraînement.")
         
-        print(f"\n🚀 === EXÉCUTION STAGE {stage_id} - {stage.config.name.upper()} ===")
+        print(f"\n🚀 === EXÉCUTION STAGE '{slug}' - {stage.config.description.upper()} ===")
         print(f"📊 Maximum {max_epochs} époques")
         
-        # Réinitialisation de l'historique du stage
         stage.reset_training_history()
         
-        # Exécution de l'entraînement via callback
         execution_result = trainer_callback(stage, max_epochs, early_stopping)
         
-        # Génération du résumé
         stage_summary = stage.get_stage_summary()
         stage_summary.update(execution_result)
         
-        # NOUVEAU : Sauvegarde automatique du checkpoint si configuré
+        # Sauvegarde automatique du checkpoint si configuré
         if hasattr(self.global_config, 'SAVE_STAGE_CHECKPOINTS') and self.global_config.SAVE_STAGE_CHECKPOINTS:
-            self.save_stage_checkpoint_with_callback(stage_id, trainer_callback)
+            self.save_stage_checkpoint_with_callback(slug, trainer_callback)
         
         # Enregistrement dans l'historique
         self.execution_history.append({
-            'stage_id': stage_id,
+            'stage_slug': slug,
             'timestamp': self._get_timestamp(),
             'summary': stage_summary
         })
         
-        print(f"✅ === STAGE {stage_id} TERMINÉ ===")
+        print(f"✅ === STAGE '{slug}' TERMINÉ ===")
         
         return stage_summary
     
-    def save_stage_checkpoint_with_callback(self, stage_id: int, trainer_callback):
+    def save_stage_checkpoint_with_callback(self, slug: str, trainer_callback):
         """Sauvegarde le checkpoint d'un stage avec callback vers le trainer."""
         if hasattr(trainer_callback, '__self__'):
             trainer = trainer_callback.__self__
-            trainer.save_stage_checkpoint(stage_id)
+            trainer.save_stage_checkpoint(slug)
     
     def execute_full_curriculum(self, trainer_callback) -> Dict[str, Any]:
         """
@@ -316,7 +225,7 @@ class ModularStageManager:
             Métriques globales de l'exécution
         """
         print(f"\n🚀 === DÉBUT CURRICULUM MODULAIRE ===")
-        print(f"🔄 Séquence: {self.stage_sequence}")
+        print(f"🔄 Séquence: {' → '.join(self.sequence.get_sequence())}")
         print(f"📊 Époques totales: {self.total_epochs_planned}")
         
         import time
@@ -326,16 +235,16 @@ class ModularStageManager:
         total_epochs_actual = 0
         
         # Exécution séquentielle des stages
-        for stage_id in self.stage_sequence:
-            stage_result = self.execute_stage(stage_id, trainer_callback)
-            all_stage_results[stage_id] = stage_result
+        for slug in self.sequence.get_sequence():
+            stage_result = self.execute_stage(slug, trainer_callback)
+            all_stage_results[slug] = stage_result
             total_epochs_actual += stage_result.get('epochs_trained', 0)
         
         # Métriques globales
         total_time = time.time() - start_time
         
         global_results = {
-            'curriculum_sequence': self.stage_sequence,
+            'curriculum_sequence': self.sequence.get_sequence(),
             'total_epochs_planned': self.total_epochs_planned,
             'total_epochs_actual': total_epochs_actual,
             'total_time_seconds': total_time,
@@ -349,8 +258,8 @@ class ModularStageManager:
         }
         
         # Résumé final
-        final_stage_id = self.stage_sequence[-1]
-        final_loss = all_stage_results[final_stage_id].get('final_loss', float('inf'))
+        final_slug = self.sequence.get_sequence()[-1]
+        final_loss = all_stage_results[final_slug].get('final_loss', float('inf'))
         global_results['final_loss'] = final_loss
         
         print(f"\n🎉 === CURRICULUM MODULAIRE TERMINÉ ===")
@@ -361,60 +270,62 @@ class ModularStageManager:
         
         return global_results
     
-    def add_custom_stage(self, stage_id: int, stage_class: Type[BaseStage]):
+    def add_custom_stage(self, slug: str, stage_class):
         """
         Ajoute un stage personnalisé au gestionnaire.
         
         Args:
-            stage_id: ID unique pour le nouveau stage
+            slug: Identifiant unique pour le nouveau stage
             stage_class: Classe du stage personnalisé
         """
-        self.registry.register_stage(stage_id, stage_class)
-        
-        # Recalcul de la séquence et époques si nécessaire
-        self.stage_sequence = self._determine_stage_sequence()
-        self.epochs_per_stage = self._calculate_epochs_per_stage()
+        # Note: Avec l'auto-discovery, il suffit de créer un répertoire
+        # Mais on garde cette méthode pour la compatibilité
+        print(f"⚠️  add_custom_stage est déprécié. Créez simplement un répertoire stages/{slug}/")
     
-    def save_stage_checkpoint(self, stage_id: int, model_state: Dict[str, Any],
+    def save_stage_checkpoint(self, slug: str, model_state: Dict[str, Any],
                              output_dir: Path):
         """
         Sauvegarde le checkpoint d'un stage.
         
         Args:
-            stage_id: ID du stage
+            slug: Identifiant du stage
             model_state: État du modèle à sauvegarder
             output_dir: Répertoire de sortie
         """
-        if stage_id not in self.active_stages:
-            print(f"⚠️  Stage {stage_id} non actif, checkpoint ignoré")
+        if slug not in self.active_stages:
+            print(f"⚠️  Stage '{slug}' non actif, checkpoint ignoré")
             return
         
-        stage = self.active_stages[stage_id]
-        stage_dir = output_dir / f"stage_{stage_id}"
+        stage = self.active_stages[slug]
+        stage_dir = output_dir / f"stage_{slug}"
         stage_dir.mkdir(parents=True, exist_ok=True)
         
         # Sauvegarde des données du stage
         checkpoint_data = {
+            'stage_slug': slug,
             'stage_config': stage.config.__dict__,
             'training_history': stage.training_history,
             'model_state': model_state,
             'timestamp': self._get_timestamp()
         }
         
-        # Sauvegarde spécialisée pour Stage 4 (intensités)
+        # Sauvegarde spécialisée pour les stages avec statistiques d'intensité
         if hasattr(stage, 'get_intensity_statistics'):
             checkpoint_data['intensity_statistics'] = stage.get_intensity_statistics()
+        
+        if hasattr(stage, 'get_attenuation_statistics'):
+            checkpoint_data['attenuation_statistics'] = stage.get_attenuation_statistics()
         
         # Fichiers de sauvegarde
         checkpoint_path = stage_dir / "stage_checkpoint.json"
         with open(checkpoint_path, 'w') as f:
             json.dump(checkpoint_data, f, indent=2, default=str)
         
-        print(f"💾 Checkpoint Stage {stage_id} sauvegardé: {stage_dir}")
+        print(f"💾 Checkpoint Stage '{slug}' sauvegardé: {stage_dir}")
     
-    def get_stage(self, stage_id: int) -> Optional[BaseStage]:
-        """Récupère un stage actif par son ID."""
-        return self.active_stages.get(stage_id)
+    def get_stage(self, slug: str) -> Optional[BaseStage]:
+        """Récupère un stage actif par son slug."""
+        return self.active_stages.get(slug)
     
     def _get_timestamp(self) -> str:
         """Génère un timestamp pour les logs."""
@@ -424,9 +335,9 @@ class ModularStageManager:
     def get_curriculum_summary(self) -> Dict[str, Any]:
         """Génère un résumé du curriculum configuré."""
         return {
-            'stage_sequence': self.stage_sequence,
+            'stage_sequence': self.sequence.get_sequence(),
             'epochs_per_stage': self.epochs_per_stage,
             'total_epochs': self.total_epochs_planned,
-            'available_stages': self.registry.list_available_stages(),
+            'available_stages': self.registry.list_stages(),
             'active_stages': list(self.active_stages.keys())
         }

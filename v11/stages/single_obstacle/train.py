@@ -1,6 +1,9 @@
 """
-Stage 2 : Apprentissage avec obstacles simples.
+Stage : Apprentissage avec un obstacle unique (single_obstacle).
 Introduction progressive des obstacles dans l'environnement.
+
+Ce stage ne connaît PAS son numéro dans la séquence.
+Il est identifié uniquement par son slug 'single_obstacle'.
 """
 
 import torch
@@ -10,30 +13,32 @@ from ..base_stage import BaseStage, StageConfig
 from ..environment_generator import EnvironmentGenerator
 
 
-class Stage2Config(StageConfig):
-    """Configuration spécialisée pour le Stage 2."""
+class SingleObstacleConfig(StageConfig):
+    """Configuration pour le stage avec un obstacle unique."""
     
     def __init__(self):
         super().__init__(
-            stage_id=2,
-            name="Un obstacle",
+            name="single_obstacle",  # Slug unique - identifiant du stage
             description="Apprentissage du contournement d'un obstacle unique",
-            epochs_ratio=0.2,  # Réduit de 0.3 à 0.2
+            epochs_ratio=0.2,
             convergence_threshold=0.0002,
-            learning_rate_multiplier=0.8,  # LR légèrement réduit
+            learning_rate_multiplier=0.8,
             min_obstacles=1,
             max_obstacles=1
         )
 
 
-class Stage2(BaseStage):
+class SingleObstacleStage(BaseStage):
     """
-    Stage 2 : Apprentissage avec un obstacle unique.
+    Stage d'apprentissage avec un obstacle unique.
     Introduction du concept de contournement d'obstacles.
+    
+    Ce stage apprend au NCA à contourner un seul obstacle
+    placé aléatoirement dans l'environnement.
     """
     
     def __init__(self, device: str = "cpu", min_obstacle_size: int = 2, max_obstacle_size: int = 4):
-        config = Stage2Config()
+        config = SingleObstacleConfig()
         super().__init__(config, device)
         self.min_obstacle_size = min_obstacle_size
         self.max_obstacle_size = max_obstacle_size
@@ -42,7 +47,6 @@ class Stage2(BaseStage):
                            seed: Optional[int] = None) -> torch.Tensor:
         """
         Génère un environnement avec un seul obstacle.
-        Utilise l'EnvironmentGenerator pour la génération d'obstacles.
         
         Args:
             size: Taille de la grille
@@ -55,7 +59,6 @@ class Stage2(BaseStage):
         Raises:
             RuntimeError: Si impossible de générer un environnement valide
         """
-        # Utilisation de l'EnvironmentGenerator pour factorisation
         env_generator = EnvironmentGenerator(self.device)
         return env_generator.generate_single_obstacle_environment(
             size, source_pos,
@@ -66,8 +69,11 @@ class Stage2(BaseStage):
     
     def prepare_training_data(self, global_config: Any) -> Dict[str, Any]:
         """
-        Prépare les données d'entraînement pour le Stage 2.
+        Prépare les données d'entraînement pour ce stage.
         
+        Args:
+            global_config: Configuration globale du système
+            
         Returns:
             Paramètres d'entraînement optimisés pour l'apprentissage avec obstacles
         """
@@ -83,7 +89,7 @@ class Stage2(BaseStage):
     def validate_convergence(self, recent_losses: List[float],
                            epoch_in_stage: int) -> bool:
         """
-        Critères de convergence pour le Stage 2.
+        Critères de convergence pour ce stage.
         Doit apprendre à contourner efficacement les obstacles.
         
         Args:
@@ -91,9 +97,9 @@ class Stage2(BaseStage):
             epoch_in_stage: Époque courante dans le stage
             
         Returns:
-            True si convergé
+            True si le stage a convergé
         """
-        # Minimum 20 époques car plus complexe que Stage 1
+        # Minimum 20 époques car plus complexe que no_obstacles
         if epoch_in_stage < 20 or len(recent_losses) < 12:
             return False
         
@@ -121,14 +127,20 @@ class Stage2(BaseStage):
     def get_learning_rate_schedule(self, epoch_in_stage: int,
                                  max_epochs: int, base_lr: float) -> float:
         """
-        Schedule LR spécialisé pour le Stage 2.
+        Schedule LR spécialisé pour ce stage.
         Décroissance plus graduelle pour l'apprentissage d'obstacles.
+        
+        Args:
+            epoch_in_stage: Époque courante dans ce stage
+            max_epochs: Nombre maximum d'époques
+            base_lr: Learning rate de base
+            
+        Returns:
+            Learning rate ajusté
         """
         import numpy as np
         
         stage_lr = base_lr * self.config.learning_rate_multiplier
-        
-        # Décroissance cosine modifiée pour obstacles
         progress = epoch_in_stage / max_epochs
         
         # Phase de warm-up initial (10% des époques)
@@ -144,53 +156,16 @@ class Stage2(BaseStage):
         return final_lr
     
     def get_loss_weights(self) -> Dict[str, float]:
-        """Poids des pertes pour le Stage 2."""
+        """
+        Poids des pertes pour ce stage.
+        
+        Returns:
+            Dictionnaire avec les poids de chaque composante de perte
+        """
         return {
             'mse': 1.0,
             'convergence': 1.5,
             'stability': 1.5,
-            'adaptation': 1.0,  # Nouveau : adaptation aux obstacles
+            'obstacle_penalty': 2.0,  # Pénalité pour traverser les obstacles
         }
-    
-    def post_epoch_hook(self, epoch_in_stage: int, loss: float,
-                       metrics: Dict[str, Any]) -> None:
-        """Hook post-époque pour le Stage 2."""
-        super().post_epoch_hook(epoch_in_stage, loss, metrics)
-        
-        # Métriques spécifiques au Stage 2
-        stage_metrics = {
-            'convergence_progress': max(0, 1 - loss / self.config.convergence_threshold),
-            'adaptation_score': self._calculate_adaptation_score(),
-            'obstacle_handling_efficiency': self._calculate_obstacle_efficiency()
-        }
-        
-        for key, value in stage_metrics.items():
-            if key not in self.training_history['metrics']:
-                self.training_history['metrics'][key] = []
-            self.training_history['metrics'][key].append(value)
-    
-    def _calculate_adaptation_score(self) -> float:
-        """Score d'adaptation basé sur la vitesse d'amélioration."""
-        if len(self.training_history['losses']) < 10:
-            return 0.0
-        
-        # Compare les 5 premières et 5 dernières pertes de l'historique récent
-        recent_losses = self.training_history['losses'][-10:]
-        first_half = sum(recent_losses[:5]) / 5
-        second_half = sum(recent_losses[5:]) / 5
-        
-        improvement_ratio = max(0, (first_half - second_half) / first_half)
-        return min(1.0, improvement_ratio * 5)  # Normalisé
-    
-    def _calculate_obstacle_efficiency(self) -> float:
-        """Efficacité de gestion des obstacles (métrique personnalisée)."""
-        if len(self.training_history['losses']) < 5:
-            return 0.0
-        
-        # Basé sur la consistance des pertes récentes
-        recent_losses = self.training_history['losses'][-5:]
-        mean_loss = sum(recent_losses) / len(recent_losses)
-        
-        # Plus la perte est faible, plus l'efficacité est haute
-        efficiency = max(0, 1 - mean_loss / (self.config.convergence_threshold * 10))
-        return min(1.0, efficiency)
+
