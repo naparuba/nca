@@ -21,36 +21,36 @@ class ProgressiveVisualizer:
         self.frame_data = {}  # Données par étape
         self.intensity_data = {}  # Données d'intensité par étape
         
-    def visualize_stage_results(self, model, stage: int, simulator, cfg,
-                              vis_seed: int = 123, source_intensity: Optional[float] = None) -> Dict[str, Any]:
+    def visualize_stage_results(self, model, stage, simulator, cfg, vis_seed=123,
+                              source_intensity=None):
         """
-        Visualise les résultats d'une étape avec support intensité variable.
+        Visualise les résultats d'un stage spécifique avec intensité variable.
         
         Args:
             model: Modèle NCA entraîné
-            stage: Numéro d'étape (1-4)
+            stage: Nom du stage (ex: 'no_obstacles', 'variable_intensity')
             simulator: Simulateur de diffusion
             cfg: Configuration
             vis_seed: Graine pour reproductibilité
-            source_intensity: Intensité spécifique pour étape 4 (None = intensité standard)
+            source_intensity: Intensité spécifique pour le stage d'intensité variable (None = intensité standard)
             
         Returns:
             Dictionnaire avec données de visualisation étendues
         """
-        print(f"\n🎨 Génération des visualisations pour l'étape {stage}...")
+        print(f"\n🎨 Génération des visualisations pour le stage '{stage}'...")
         
         # Génération de la séquence de test avec seed fixe
         torch.manual_seed(vis_seed)
         np.random.seed(vis_seed)
         
-        # Génération adaptée selon l'étape
-        if stage == 4 and source_intensity is not None:
-            # Étape 4: utilise l'intensité spécifiée
+        # Génération adaptée selon le stage
+        if stage == 'variable_intensity' and source_intensity is not None:
+            # Stage d'intensité variable : utilise l'intensité spécifiée
             target_seq, source_mask, obstacle_mask, used_intensity = simulator.generate_stage_sequence(
-                stage=4, n_steps=cfg.POSTVIS_STEPS, size=cfg.GRID_SIZE,
+                stage=stage, n_steps=cfg.POSTVIS_STEPS, size=cfg.GRID_SIZE,
                 seed=vis_seed, source_intensity=source_intensity)
         else:
-            # Étapes 1-3: intensité standard
+            # Autres stages : intensité standard
             target_seq, source_mask, obstacle_mask, used_intensity = simulator.generate_stage_sequence(
                 stage=stage, n_steps=cfg.POSTVIS_STEPS, size=cfg.GRID_SIZE, seed=vis_seed)
             if used_intensity is None:
@@ -152,7 +152,7 @@ class ProgressiveVisualizer:
         intensity = vis_data['source_intensity']
         
         # Création du répertoire de sortie
-        if stage == 4:
+        if stage == 'variable_intensity':
             stage_dir = Path(cfg.OUTPUT_DIR) / f"stage_{stage}"
             intensity_suffix = f"_I_{intensity:.3f}"
         else:
@@ -190,7 +190,7 @@ class ProgressiveVisualizer:
         stage = vis_data['stage']
         intensity = vis_data['source_intensity']
         
-        if stage == 4:
+        if stage == 'variable_intensity':
             stage_dir = Path(cfg.OUTPUT_DIR) / f"stage_{stage}"
             intensity_suffix = f"_I_{intensity:.3f}"
         else:
@@ -250,7 +250,7 @@ class ProgressiveVisualizer:
         
         for i, intensity in enumerate(intensity_samples):
             # Génération avec intensité spécifique
-            vis_data = self.visualize_stage_results(model, stage=4, simulator=simulator, cfg=cfg,
+            vis_data = self.visualize_stage_results(model, stage='variable_intensity', simulator=simulator, cfg=cfg,
                                                   vis_seed=vis_seed, source_intensity=intensity)
             
             # État initial

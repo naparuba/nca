@@ -72,24 +72,24 @@ class GlobalConfig:
         # Configuration optionnelle de séquence personnalisée
         # self.CUSTOM_STAGE_SEQUENCE = [1, 2, 3, 4]  # Si on veut personnaliser
     
-    def get_convergence_threshold(self, stage_number: int, stage_manager) -> float:
+    def get_convergence_threshold(self, stage_name: str, stage_manager) -> float:
         """
         Récupère le seuil de convergence d'un stage depuis sa configuration.
         Évite la duplication en utilisant directement les seuils définis dans les stages.
+        
+        Args:
+            stage_name: Nom du stage (slug) - ex: 'no_obstacles', 'variable_intensity'
+            stage_manager: Gestionnaire de stages pour accéder aux configurations
+            
+        Returns:
+            Seuil de convergence du stage
         """
         if stage_manager is None:
             return 0.05  # Valeur par défaut de fallback
         
-        sequence = stage_manager.sequence.get_sequence()
-        stage_index = stage_number - 1
-        
-        if stage_index < 0 or stage_index >= len(sequence):
-            return 0.05  # Valeur par défaut de fallback
-        
-        stage_slug = sequence[stage_index]
-        
-        if stage_slug in stage_manager.active_stages:
-            stage = stage_manager.active_stages[stage_slug]
+        # Accès direct par nom de stage au lieu de conversion d'index
+        if stage_name in stage_manager.active_stages:
+            stage = stage_manager.active_stages[stage_name]
             return stage.config.convergence_threshold
         
         return 0.05  # Valeur par défaut de fallback
@@ -156,15 +156,14 @@ class ModularDiffusionSimulator:
 
         return new_grid
 
-    def generate_stage_sequence(self, stage: int, n_steps: int, size: int,
+    def generate_stage_sequence(self, stage: str, n_steps: int, size: int,
                               source_intensity: Optional[float] = None,
                               seed: Optional[int] = None) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor, float]:
         """
-        Méthode de compatibilité pour les visualiseurs.
-        Accepte un numéro de stage au lieu d'un objet stage.
+        Génère une séquence en utilisant un nom de stage.
         
         Args:
-            stage: Numéro du stage (entier, 1-indexé)
+            stage: Nom du stage (slug) - ex: 'no_obstacles', 'variable_intensity'
             n_steps: Nombre d'étapes de simulation
             size: Taille de la grille
             source_intensity: Intensité spécifique (optionnel)
@@ -176,22 +175,17 @@ class ModularDiffusionSimulator:
         if self.stage_manager is None:
             raise RuntimeError("Stage manager non défini. Appelez set_stage_manager() d'abord.")
         
-        # Utiliser la séquence existante du stage manager au lieu de dupliquer
-        sequence = self.stage_manager.sequence.get_sequence()
+        # Vérification que c'est bien un string
+        if not isinstance(stage, str):
+            raise TypeError(f"Le paramètre 'stage' doit être un nom de stage (str), reçu: {type(stage).__name__} = {stage}")
         
-        # Conversion 1-indexé vers 0-indexé pour accéder à la liste
-        stage_index = stage - 1
-        
-        if stage_index < 0 or stage_index >= len(sequence):
-            raise ValueError(f"Stage {stage} non valide. Stages disponibles: 1-{len(sequence)} correspondant à {sequence}")
-        
-        stage_slug = sequence[stage_index]
-        
-        if stage_slug not in self.stage_manager.active_stages:
-            raise ValueError(f"Stage '{stage_slug}' non actif dans le gestionnaire de stages")
+        # Vérification que le stage existe
+        if stage not in self.stage_manager.active_stages:
+            available_stages = list(self.stage_manager.active_stages.keys())
+            raise ValueError(f"Stage '{stage}' non trouvé. Stages disponibles: {available_stages}")
         
         # Récupération de l'objet stage et délégation à la méthode principale
-        stage_obj = self.stage_manager.active_stages[stage_slug]
+        stage_obj = self.stage_manager.active_stages[stage]
         return self.generate_sequence_with_stage(stage_obj, n_steps, size, source_intensity, seed)
 
     def generate_sequence_with_stage(self, stage: BaseStage, n_steps: int, size: int,
@@ -1028,7 +1022,6 @@ def main():
         
         # Résumé des visualisations générées
         print(f"\n🎨 Visualisations générées:")
-        print(f"   • Répertoires par stage: stage_1/, stage_2/, stage_3/, stage_4/")
         print(f"   • Animations comparatives par stage")
         print(f"   • Graphiques de convergence par stage")
         print(f"   • Suite complète de visualisations étendues")

@@ -52,3 +52,5 @@ Tu es également un spécialiste en développement d’intelligence artificielle
 
 ## PYTHON
 - tu dois éviter les exports d'imports style __all__ = ['A', 'B'] sauf si c'est STRICTEMENT nécessaire, car ça alourdi les choses pour rien
+- tu DOIS avoir du typing partout, y compris dans les fonctions privées
+- tu ne DOIT PAS prévoir de code de failback: le code doit être bon ou il plante, pas de demi-mesure

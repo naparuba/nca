@@ -130,6 +130,9 @@ class BaseStage(ABC):
         """
         return {'mse': 1.0}
     
+    def get_name(self) -> str:
+        return self.config.name
+    
     def post_epoch_hook(self, epoch_in_stage: int, loss: float,
                        metrics: Dict[str, Any]) -> None:
         """

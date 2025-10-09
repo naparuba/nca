@@ -15,8 +15,8 @@ def create_complete_visualization_suite(model, global_metrics: Dict[str, Any],
     Crée la suite complète de visualisations pour la version 8__.
     
     Comprend:
-    - Visualisations par étape (1-4) avec intensités
-    - Comparaisons d'intensités pour l'étape 4
+    - Visualisations par étape avec intensités
+    - Comparaisons d'intensités pour le stage d'intensité variable
     - Graphiques de curriculum étendu
     - Métriques spécialisées intensités variables
     
@@ -36,15 +36,25 @@ def create_complete_visualization_suite(model, global_metrics: Dict[str, Any],
     # 1. Visualisations par étape (étendues)
     print("\n🎨 Génération des visualisations par étape...")
     
-    # Étapes 1-3: intensité standard
-    for stage in [1, 2, 3]:
-        stage_vis = visualizer.visualize_stage_results(model, stage, simulator, cfg)
+    # Récupération de la séquence de stages depuis le simulateur
+    from ..sequence import StageSequence
+    sequence = StageSequence()
+    stage_names = sequence.get_sequence()
+    
+    # Visualisations pour tous les stages sauf le dernier (intensité variable)
+    for stage_name in stage_names[:-1]:  # Exclut 'variable_intensity'
+        print(f"🎨 Génération des visualisations pour le stage '{stage_name}'...")
+        stage_vis = visualizer.visualize_stage_results(model, stage_name, simulator, cfg)
 
-    # Étape 4: plusieurs intensités pour analyse comparative
-    stage_4_intensities = [0.0, 0.3, 0.7, 1.0]
-    for intensity in stage_4_intensities:
-        stage_vis = visualizer.visualize_stage_results(model, stage=4, simulator=simulator, cfg=cfg,
-                                                         source_intensity=intensity)
+    # Stage d'intensité variable: plusieurs intensités pour analyse comparative
+    variable_intensity_stage = 'variable_intensity'
+    if variable_intensity_stage in stage_names:
+        print(f"🎨 Génération des visualisations pour le stage '{variable_intensity_stage}' avec intensités multiples...")
+        variable_intensity_intensities = [0.0, 0.3, 0.7, 1.0]
+        for intensity in variable_intensity_intensities:
+            stage_vis = visualizer.visualize_stage_results(
+                model, stage=variable_intensity_stage, simulator=simulator, cfg=cfg,
+                source_intensity=intensity)
 
     
     # 2. Grille comparative d'intensités
@@ -54,10 +64,11 @@ def create_complete_visualization_suite(model, global_metrics: Dict[str, Any],
     
     # 3. Curriculum d'intensité (nouveau)
     print("\n🎨 Génération des graphiques de curriculum d'intensité...")
-    if 'stage_4_metrics' in global_metrics:
-        visualizer.visualize_intensity_curriculum(global_metrics['stage_4_metrics'], cfg)
+    variable_intensity_metrics_key = f"{variable_intensity_stage}_metrics"
+    if variable_intensity_metrics_key in global_metrics:
+        visualizer.visualize_intensity_curriculum(global_metrics[variable_intensity_metrics_key], cfg)
     else:
-        print("⚠️ Métriques étape 4 non disponibles pour le curriculum d'intensité")
+        print(f"⚠️ Métriques du stage '{variable_intensity_stage}' non disponibles pour le curriculum d'intensité")
 
     
     # 4. Résumé visuel étendu
