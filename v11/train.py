@@ -1,11 +1,11 @@
-import argparse
 import json
 import os
+# HACK for imports
+import sys
 import time
 from pathlib import Path
 from typing import Tuple, List, Dict, Any
 
-import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -13,179 +13,34 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+sys.path.append(os.path.dirname(__file__))
+
+from config import CONFIG
+from torching import DEVICE
+
 # =============================================================================
 # Configuration et initialisation modulaire
 # =============================================================================
 
-SEED = 3333
 
-VISUALIZATION_SEED=3333
-
-NB_EPOCHS_BY_STAGE = 200
-
-TOTAL_EPOCHS = NB_EPOCHS_BY_STAGE * 3
-
-STAGNATION_THRESHOLD = 0.000001  # seuil de stagnation pour avancer d'étape
-STAGNATION_PATIENCE = NB_EPOCHS_BY_STAGE // 4  # if we flat for 1/4 of an epochs, we consider it stagnated
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-class ModularConfig:
-    """
-    Configuration étendue pour l'apprentissage modulaire progressif.
-    Hérite des paramètres de base et ajoute la gestion des étapes.
-    """
-    
-    
-    def __init__(self):
-        # Paramètres matériels de base
-        
-        # Paramètres de grille
-        self.GRID_SIZE = 16
-        self.SOURCE_INTENSITY = 1.0
-        
-        # Paramètres d'entraînement modulaire
-        self.TOTAL_EPOCHS = TOTAL_EPOCHS  # Augmenté pour l'apprentissage modulaire
-        self.NCA_STEPS = 20
-        self.LEARNING_RATE = 1e-3
-        self.BATCH_SIZE = 4
-        
-        # Calcul automatique des époques par étape
-        self.STAGE_1_EPOCHS = NB_EPOCHS_BY_STAGE
-        self.STAGE_2_EPOCHS = NB_EPOCHS_BY_STAGE
-        self.STAGE_3_EPOCHS = NB_EPOCHS_BY_STAGE
-        
-        # Seuils de convergence adaptatifs par étape
-        self.CONVERGENCE_THRESHOLDS = {
-            1: 0.01,  # Étape 1: convergence stricte
-            2: 0.02,  # Étape 2: tolérance accrue
-            3: 0.05  # Étape 3: tolérance maximale
-        }
-        
-        # Paramètres de visualisation
-        self.PREVIS_STEPS = 30
-        self.POSTVIS_STEPS = 50
-        self.OUTPUT_DIR = "outputs"
-        
-        # Paramètres du modèle
-        self.HIDDEN_SIZE = 128
-        self.N_LAYERS = 3
-        
-        # Paramètres d'obstacles par étape
-        self.STAGE_OBSTACLE_CONFIG = {
-            1: {'min_obstacles': 0, 'max_obstacles': 0},  # Pas d'obstacles
-            2: {'min_obstacles': 1, 'max_obstacles': 1},  # Un seul obstacle
-            3: {'min_obstacles': 2, 'max_obstacles': 4}  # 2-4 obstacles
-        }
-        
-        self.MIN_OBSTACLE_SIZE = 2
-        self.MAX_OBSTACLE_SIZE = 4
-        
-        # Optimisations
-        self.CACHE_SIZE = 200
-        self.USE_MIXED_PRECISION = False
-        
-        # Nouveaux paramètres modulaires
-        self.MAX_STAGE_RETRIES = 3  # Tentatives max par étape
-        self.EARLY_STOPPING_PATIENCE = 20  # Patience pour arrêt précoce
-        self.STAGE_TRANSITION_SMOOTHING = True  # Lissage des transitions
-
-
-def parse_modular_arguments():
-    """
-    Parse les arguments étendus pour l'apprentissage modulaire.
-    """
-    parser = argparse.ArgumentParser(
-            description='Neural Cellular Automaton - Apprentissage Modulaire Progressif',
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter
-    )
-    
-    # Arguments de base
-    parser.add_argument('--seed', type=int, default=123,
-                        help='Graine aléatoire pour la reproductibilité')
-    parser.add_argument('--vis-seed', type=int, default=3333,
-                        help='Graine pour les visualisations')
-    parser.add_argument('--total-epochs', type=int, default=200,
-                        help='Nombre total d\'époques d\'entraînement')
-    parser.add_argument('--grid-size', type=int, default=16,
-                        help='Taille de la grille')
-    parser.add_argument('--batch-size', type=int, default=4,
-                        help='Taille des batches')
-    
-    # Arguments modulaires (NOUVEAUX)
-    parser.add_argument('--stage1-ratio', type=float, default=0.5,
-                        help='Ratio d\'époques pour l\'étape 1 (sans obstacles)')
-    parser.add_argument('--stage2-ratio', type=float, default=0.3,
-                        help='Ratio d\'époques pour l\'étape 2 (un obstacle)')
-    parser.add_argument('--stage3-ratio', type=float, default=0.2,
-                        help='Ratio d\'époques pour l\'étape 3 (obstacles multiples)')
-    
-    parser.add_argument('--adaptive-thresholds', action='store_true', default=True,
-                        help='Utiliser des seuils adaptatifs pour l\'avancement')
-    parser.add_argument('--max-obstacles', type=int, default=4,
-                        help='Nombre maximum d\'obstacles en étape 3')
-    parser.add_argument('--save-stage-checkpoints', action='store_true', default=True,
-                        help='Sauvegarder les modèles à chaque étape')
-    
-    return parser.parse_args()
-
-
-# Parse des arguments et configuration
-args = parse_modular_arguments()
-cfg = ModularConfig()
-
-# Mise à jour depuis les arguments
-cfg.TOTAL_EPOCHS = args.total_epochs
-cfg.GRID_SIZE = args.grid_size
-cfg.BATCH_SIZE = args.batch_size
-
-# Configuration max obstacles étape 3
-cfg.STAGE_OBSTACLE_CONFIG[3]['max_obstacles'] = args.max_obstacles
-
-
-# Gestion matplotlib (héritée de v6)
-def setup_matplotlib():
-    """Configure matplotlib pour l'affichage interactif ou la sauvegarde."""
-    try:
-        matplotlib.use('Qt5Agg')
-        plt.ion()
-        fig, ax = plt.subplots()
-        plt.close(fig)
-        print("✅ Mode interactif activé")
-        return True
-    except:
-        try:
-            matplotlib.use('TkAgg')
-            plt.ion()
-            fig, ax = plt.subplots()
-            plt.close(fig)
-            print("✅ Mode interactif activé (TkAgg)")
-            return True
-        except:
-            print("⚠️  Mode non-interactif détecté - les animations seront sauvegardées")
-            matplotlib.use('Agg')
-            return False
-
+SEED = CONFIG.SEED
+VISUALIZATION_SEED = CONFIG.VISUALIZATION_SEED
+STAGNATION_THRESHOLD = CONFIG.STAGNATION_THRESHOLD
+STAGNATION_PATIENCE = CONFIG.STAGNATION_PATIENCE
 
 # Initialisation
-interactive_mode = setup_matplotlib()
-if os.name == 'nt':
-    interactive_mode = False
-
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
 # Création du répertoire de sortie avec seed
-cfg.OUTPUT_DIR = f"outputs"
-os.makedirs(cfg.OUTPUT_DIR, exist_ok=True)
+CONFIG.OUTPUT_DIR = f"outputs"
+os.makedirs(CONFIG.OUTPUT_DIR, exist_ok=True)
 
-print(f"🎯 Configuration Modulaire NCA v11")
 print(f"Device: {DEVICE}")
 print(f"Seed: {SEED}")
-print(f"Mode interactif: {interactive_mode}")
-print(f"Répertoire de sortie: {cfg.OUTPUT_DIR}")
-print(f"Étapes: {cfg.STAGE_1_EPOCHS} + {cfg.STAGE_2_EPOCHS} + {cfg.STAGE_3_EPOCHS} = {cfg.TOTAL_EPOCHS} époques")
+print(f"Répertoire de sortie: {CONFIG.OUTPUT_DIR}")
+
+from stage_manager import STAGE_MANAGER
 
 
 # =============================================================================
@@ -200,160 +55,156 @@ class ProgressiveObstacleManager:
     
     
     def __init__(self):
-        self.stage_configs = cfg.STAGE_OBSTACLE_CONFIG
+        pass
     
     
-    def generate_stage_environment(self, stage: int, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    def generate_stage_environment(self, stage_nb: int, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
         """
         Génère un environnement d'obstacles adapté à l'étape courante.
         
         Args:
-            stage: Numéro d'étape (1, 2, ou 3)
+            stage_nb: Numéro d'étape (1, 2, ou 3)
             size: Taille de la grille
             source_pos: Position de la source (i, j)
             
         Returns:
             Masque des obstacles [H, W]
         """
-        if stage not in self.stage_configs:
-            raise ValueError(f"Étape {stage} non supportée. Étapes valides: {list(self.stage_configs.keys())}")
         
-        config = self.stage_configs[stage]
+        stage = STAGE_MANAGER.get_stage(stage_nb)
+        #print(f"🎯 Génération d'environnement pour l'étape {stage_nb} ({stage.get_name()})...")
         
-        if stage == 1:
-            return self._generate_stage_1_environment(size)
-        elif stage == 2:
-            return self._generate_stage_2_environment(size, source_pos)
-        elif stage == 3:
-            return self._generate_stage_3_environment(size, source_pos)
+        return stage.generate_environment(size, source_pos)
+        # if stage_nb == 1:
+        #     return self._generate_stage_1_environment(size)
+        # elif stage_nb == 2:
+        #     return self._generate_stage_2_environment(size, source_pos)
+        # elif stage_nb == 3:
+        #     return self._generate_stage_3_environment(size, source_pos)
     
     
-    def _generate_stage_1_environment(self, size: int) -> torch.Tensor:
-        """Étape 1: Aucun obstacle - grille vide pour apprentissage de base."""
-        return torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
+    # def _generate_stage_1_environment(self, size: int) -> torch.Tensor:
+    #     """Étape 1: Aucun obstacle - grille vide pour apprentissage de base."""
+    #     return torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
     
+    # def _generate_stage_2_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    #     """Étape 2: Un seul obstacle pour apprentissage du contournement."""
+    #     obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
+    #
+    #     g = torch.Generator(device=DEVICE)
+    #     g.manual_seed(SEED)
+    #
+    #     # Un seul obstacle de taille aléatoire
+    #     obstacle_size = torch.randint(CONFIG.MIN_OBSTACLE_SIZE, CONFIG.MAX_OBSTACLE_SIZE + 1,
+    #                                   (1,), generator=g, device=DEVICE).item()
+    #
+    #     # Placement en évitant la source et les bords
+    #     max_pos = size - obstacle_size
+    #     if max_pos <= 1:
+    #         return obstacle_mask  # Grille trop petite
+    #
+    #     source_i, source_j = source_pos
+    #
+    #     for attempt in range(100):  # Plus de tentatives pour étape 2
+    #         i = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
+    #         j = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
+    #
+    #         # Vérifier non-chevauchement avec source
+    #         if not (i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size):
+    #             obstacle_mask[i:i + obstacle_size, j:j + obstacle_size] = True
+    #             break
+    #
+    #     return obstacle_mask
     
-    def _generate_stage_2_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
-        """Étape 2: Un seul obstacle pour apprentissage du contournement."""
-        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
-        
-        g = torch.Generator(device=DEVICE)
-        g.manual_seed(SEED)
-        
-        # Un seul obstacle de taille aléatoire
-        obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1,
-                                      (1,), generator=g, device=DEVICE).item()
-        
-        # Placement en évitant la source et les bords
-        max_pos = size - obstacle_size
-        if max_pos <= 1:
-            return obstacle_mask  # Grille trop petite
-        
-        source_i, source_j = source_pos
-        
-        for attempt in range(100):  # Plus de tentatives pour étape 2
-            i = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
-            j = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
-            
-            # Vérifier non-chevauchement avec source
-            if not (i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size):
-                obstacle_mask[i:i + obstacle_size, j:j + obstacle_size] = True
-                break
-        
-        return obstacle_mask
+    # def _generate_stage_3_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    #     """Étape 3: Obstacles multiples pour gestion de la complexité."""
+    #     obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
+    #
+    #     g = torch.Generator(device=DEVICE)
+    #     g.manual_seed(SEED)
+    #
+    #     config = self.stage_configs[3]
+    #     n_obstacles = torch.randint(config['min_obstacles'], config['max_obstacles'] + 1,
+    #                                 (1,), generator=g, device=DEVICE).item()
+    #
+    #     source_i, source_j = source_pos
+    #     placed_obstacles = []
+    #
+    #     for obstacle_idx in range(n_obstacles):
+    #         obstacle_size = torch.randint(CONFIG.MIN_OBSTACLE_SIZE, CONFIG.MAX_OBSTACLE_SIZE + 1,
+    #                                       (1,), generator=g, device=DEVICE).item()
+    #
+    #         max_pos = size - obstacle_size
+    #         if max_pos <= 1:
+    #             continue
+    #
+    #         for attempt in range(50):
+    #             i = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
+    #             j = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
+    #
+    #             # Vérifications multiples pour étape 3
+    #             valid_position = True
+    #
+    #             # 1. Pas de chevauchement avec source
+    #             if i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size:
+    #                 valid_position = False
+    #
+    #             # 2. Pas de chevauchement avec obstacles existants
+    #             for obs_i, obs_j, obs_size in placed_obstacles:
+    #                 if (i < obs_i + obs_size and i + obstacle_size > obs_i and
+    #                         j < obs_j + obs_size and j + obstacle_size > obs_j):
+    #                     valid_position = False
+    #                     break
+    #
+    #             if valid_position:
+    #                 obstacle_mask[i:i + obstacle_size, j:j + obstacle_size] = True
+    #                 placed_obstacles.append((i, j, obstacle_size))
+    #                 break
+    #
+    #     # Validation finale de connectivité
+    #     if not self._validate_connectivity(obstacle_mask, source_pos):
+    #         print("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
+    #         return self._generate_stage_2_environment(size, source_pos)
+    #
+    #     return obstacle_mask
     
+    # def _validate_connectivity(self, obstacle_mask: torch.Tensor, source_pos: Tuple[int, int]) -> bool:
+    #     """
+    #     Valide qu'un chemin de diffusion reste possible avec les obstacles.
+    #     Utilise un algorithme de flood-fill simplifié.
+    #     """
+    #     H, W = obstacle_mask.shape
+    #     source_i, source_j = source_pos
+    #
+    #     # Matrice de visite
+    #     visited = torch.zeros_like(obstacle_mask, dtype=torch.bool)
+    #     visited[obstacle_mask] = True  # Les obstacles sont "déjà visités"
+    #
+    #     # Flood-fill depuis la source
+    #     stack = [(source_i, source_j)]
+    #     visited[source_i, source_j] = True
+    #     accessible_cells = 1
+    #
+    #     while stack:
+    #         i, j = stack.pop()
+    #
+    #         # Parcours des 4 voisins
+    #         for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+    #             ni, nj = i + di, j + dj
+    #
+    #             if (0 <= ni < H and 0 <= nj < W and
+    #                     not visited[ni, nj] and not obstacle_mask[ni, nj]):
+    #                 visited[ni, nj] = True
+    #                 stack.append((ni, nj))
+    #                 accessible_cells += 1
+    #
+    #     # Au moins 50% de la grille doit être accessible pour une bonne diffusion
+    #     total_free_cells = (H * W) - obstacle_mask.sum().item()
+    #     connectivity_ratio = accessible_cells / max(total_free_cells, 1)
+    #
+    #     return connectivity_ratio >= 0.5
     
-    def _generate_stage_3_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
-        """Étape 3: Obstacles multiples pour gestion de la complexité."""
-        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
-        
-        g = torch.Generator(device=DEVICE)
-        g.manual_seed(SEED)
-        
-        config = self.stage_configs[3]
-        n_obstacles = torch.randint(config['min_obstacles'], config['max_obstacles'] + 1,
-                                    (1,), generator=g, device=DEVICE).item()
-        
-        source_i, source_j = source_pos
-        placed_obstacles = []
-        
-        for obstacle_idx in range(n_obstacles):
-            obstacle_size = torch.randint(cfg.MIN_OBSTACLE_SIZE, cfg.MAX_OBSTACLE_SIZE + 1,
-                                          (1,), generator=g, device=DEVICE).item()
-            
-            max_pos = size - obstacle_size
-            if max_pos <= 1:
-                continue
-            
-            for attempt in range(50):
-                i = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
-                j = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
-                
-                # Vérifications multiples pour étape 3
-                valid_position = True
-                
-                # 1. Pas de chevauchement avec source
-                if i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size:
-                    valid_position = False
-                
-                # 2. Pas de chevauchement avec obstacles existants
-                for obs_i, obs_j, obs_size in placed_obstacles:
-                    if (i < obs_i + obs_size and i + obstacle_size > obs_i and
-                            j < obs_j + obs_size and j + obstacle_size > obs_j):
-                        valid_position = False
-                        break
-                
-                if valid_position:
-                    obstacle_mask[i:i + obstacle_size, j:j + obstacle_size] = True
-                    placed_obstacles.append((i, j, obstacle_size))
-                    break
-        
-        # Validation finale de connectivité
-        if not self._validate_connectivity(obstacle_mask, source_pos):
-            print("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
-            return self._generate_stage_2_environment(size, source_pos)
-        
-        return obstacle_mask
-    
-    
-    def _validate_connectivity(self, obstacle_mask: torch.Tensor, source_pos: Tuple[int, int]) -> bool:
-        """
-        Valide qu'un chemin de diffusion reste possible avec les obstacles.
-        Utilise un algorithme de flood-fill simplifié.
-        """
-        H, W = obstacle_mask.shape
-        source_i, source_j = source_pos
-        
-        # Matrice de visite
-        visited = torch.zeros_like(obstacle_mask, dtype=torch.bool)
-        visited[obstacle_mask] = True  # Les obstacles sont "déjà visités"
-        
-        # Flood-fill depuis la source
-        stack = [(source_i, source_j)]
-        visited[source_i, source_j] = True
-        accessible_cells = 1
-        
-        while stack:
-            i, j = stack.pop()
-            
-            # Parcours des 4 voisins
-            for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                ni, nj = i + di, j + dj
-                
-                if (0 <= ni < H and 0 <= nj < W and
-                        not visited[ni, nj] and not obstacle_mask[ni, nj]):
-                    visited[ni, nj] = True
-                    stack.append((ni, nj))
-                    accessible_cells += 1
-        
-        # Au moins 50% de la grille doit être accessible pour une bonne diffusion
-        total_free_cells = (H * W) - obstacle_mask.sum().item()
-        connectivity_ratio = accessible_cells / max(total_free_cells, 1)
-        
-        return connectivity_ratio >= 0.5
-    
-    
-    def get_difficulty_metrics(self, stage: int, obstacle_mask: torch.Tensor) -> Dict[str, float]:
+    def get_difficulty_metrics(self, stage_nb: int, obstacle_mask: torch.Tensor) -> Dict[str, float]:
         """
         Calcule des métriques de difficulté pour l'environnement généré.
         
@@ -365,10 +216,10 @@ class ProgressiveObstacleManager:
         obstacle_cells = obstacle_mask.sum().item()
         
         metrics = {
-            'stage':            stage,
+            'stage_nb':         stage_nb,
             'obstacle_ratio':   obstacle_cells / total_cells,
             'free_cells':       total_cells - obstacle_cells,
-            'complexity_score': stage * (obstacle_cells / total_cells)
+            'complexity_score': stage_nb * (obstacle_cells / total_cells)
         }
         
         return metrics
@@ -402,12 +253,12 @@ class DiffusionSimulator:
         return new_grid
     
     
-    def generate_stage_sequence(self, stage: int, n_steps: int, size: int) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
+    def generate_stage_sequence(self, stage_nb: int, n_steps: int, size: int) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
         """
         Génère une séquence adaptée à l'étape d'apprentissage courante.
         
         Args:
-            stage: Étape d'apprentissage (1, 2, ou 3)
+            stage_nb: Étape d'apprentissage (1, 2, ou 3)
             n_steps: Nombre d'étapes de simulation
             size: Taille de la grille
             
@@ -421,11 +272,11 @@ class DiffusionSimulator:
         j0 = torch.randint(2, size - 2, (1,), generator=g, device=DEVICE).item()
         
         # Génération d'obstacles selon l'étape
-        obstacle_mask = self.obstacle_manager.generate_stage_environment(stage, size, (i0, j0))
+        obstacle_mask = self.obstacle_manager.generate_stage_environment(stage_nb, size, (i0, j0))
         
         # Initialisation
         grid = torch.zeros((size, size), device=DEVICE)
-        grid[i0, j0] = cfg.SOURCE_INTENSITY
+        grid[i0, j0] = CONFIG.SOURCE_INTENSITY
         
         source_mask = torch.zeros_like(grid, dtype=torch.bool)
         source_mask[i0, j0] = True
@@ -458,27 +309,26 @@ class ImprovedNCA(nn.Module):
     """
     
     
-    def __init__(self, input_size: int = 11, hidden_size: int = cfg.HIDDEN_SIZE,
-                 n_layers: int = cfg.N_LAYERS):
+    def __init__(self, input_size: int):
         super().__init__()
         
         self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.n_layers = n_layers
+        self.hidden_size = CONFIG.HIDDEN_SIZE
+        self.n_layers = CONFIG.N_LAYERS
         
         # Architecture profonde avec normalisation
         layers = []
         current_size = input_size
         
-        for i in range(n_layers):
-            layers.append(nn.Linear(current_size, hidden_size))
-            layers.append(nn.BatchNorm1d(hidden_size))
+        for i in range(self.n_layers):
+            layers.append(nn.Linear(current_size, self.hidden_size))
+            layers.append(nn.BatchNorm1d(self.hidden_size))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(0.1))
-            current_size = hidden_size
+            current_size = self.hidden_size
         
         # Couche de sortie stabilisée
-        layers.append(nn.Linear(hidden_size, 1))
+        layers.append(nn.Linear(self.hidden_size, 1))
         layers.append(nn.Tanh())
         
         self.network = nn.Sequential(*layers)
@@ -597,8 +447,8 @@ class CurriculumScheduler:
     def __init__(self, convergence_thresholds: Dict[int, float], patience: int = 10):
         self.thresholds = convergence_thresholds
         self.patience = patience
-        self.stage_metrics_history = {stage: [] for stage in [1, 2, 3]}
-        self.no_improvement_counts = {stage: 0 for stage in [1, 2, 3]}
+        self.stage_metrics_history = {stage_nb: [] for stage_nb in [1, 2, 3]}
+        self.no_improvement_counts = {stage_nb: 0 for stage_nb in [1, 2, 3]}
     
     
     def should_advance_stage(self, current_stage: int, recent_losses: List[float]) -> bool:
@@ -628,18 +478,18 @@ class CurriculumScheduler:
         return stagnated
     
     
-    def adjust_learning_rate(self, optimizer, stage: int, epoch_in_stage: int):
+    def adjust_learning_rate(self, optimizer, stage_nb: int, epoch_in_stage: int):
         """Ajuste le learning rate selon l'étape et la progression."""
         
-        base_lr = cfg.LEARNING_RATE
+        base_lr = CONFIG.LEARNING_RATE
         
         # Réduction progressive par étape
         stage_multipliers = {1: 1.0, 2: 0.8, 3: 0.6}
-        stage_lr = base_lr * stage_multipliers.get(stage, 0.5)
+        stage_lr = base_lr * stage_multipliers.get(stage_nb, 0.5)
         
         # Décroissance cosine au sein de l'étape
-        stage_epochs = {1: cfg.STAGE_1_EPOCHS, 2: cfg.STAGE_2_EPOCHS, 3: cfg.STAGE_3_EPOCHS}
-        max_epochs = stage_epochs.get(stage, 50)
+        stage_epochs = {1: CONFIG.STAGE_1_EPOCHS, 2: CONFIG.STAGE_2_EPOCHS, 3: CONFIG.STAGE_3_EPOCHS}
+        max_epochs = stage_epochs.get(stage_nb, 50)
         
         cos_factor = 0.5 * (1 + np.cos(np.pi * epoch_in_stage / max_epochs))
         final_lr = stage_lr * (0.1 + 0.9 * cos_factor)  # Ne descend pas sous 10% du LR de base
@@ -648,14 +498,14 @@ class CurriculumScheduler:
             param_group['lr'] = final_lr
     
     
-    def get_stage_loss_weights(self, stage: int) -> Dict[str, float]:
+    def get_stage_loss_weights(self, stage_nb: int) -> Dict[str, float]:
         """Retourne les poids de pondération des pertes par étape."""
         weights = {
             1: {'mse': 1.0, 'convergence': 2.0, 'stability': 1.0},
             2: {'mse': 1.0, 'convergence': 1.5, 'stability': 1.5, 'adaptation': 1.0},
             3: {'mse': 1.0, 'convergence': 1.0, 'stability': 2.0, 'robustness': 1.5}
         }
-        return weights.get(stage, weights[1])
+        return weights.get(stage_nb, weights[1])
 
 
 # =============================================================================
@@ -676,65 +526,65 @@ class OptimizedSequenceCache:
         self.current_indices = {}
     
     
-    def initialize_stage_cache(self, stage: int):
+    def initialize_stage_cache(self, stage_nb: int):
         """Initialise le cache pour une étape spécifique."""
-        if stage in self.stage_caches:
+        if stage_nb in self.stage_caches:
             return  # Déjà initialisé
         
-        cache_size = self.cache_sizes.get(stage, 200)
-        print(f"🎯 Génération de {cache_size} séquences pour l'étape {stage}...")
+        cache_size = self.cache_sizes.get(stage_nb, 200)
+        print(f"🎯 Génération de {cache_size} séquences pour l'étape {stage_nb}...")
         
         sequences = []
         for i in range(cache_size):
             if i % 50 == 0:
-                print(f"   Étape {stage}: {i}/{cache_size}")
+                print(f"   Étape {stage_nb}: {i}/{cache_size}")
             
             target_seq, source_mask, obstacle_mask = self.simulator.generate_stage_sequence(
-                    stage=stage,
-                    n_steps=cfg.NCA_STEPS,
-                    size=cfg.GRID_SIZE
+                    stage_nb=stage_nb,
+                    n_steps=CONFIG.NCA_STEPS,
+                    size=CONFIG.GRID_SIZE
             )
             
             sequences.append({
                 'target_seq':    target_seq,
                 'source_mask':   source_mask,
                 'obstacle_mask': obstacle_mask,
-                'stage':         stage
+                'stage_nb':      stage_nb
             })
         
-        self.stage_caches[stage] = sequences
-        self.current_indices[stage] = 0
-        print(f"✅ Cache étape {stage} créé ({cache_size} séquences)")
+        self.stage_caches[stage_nb] = sequences
+        self.current_indices[stage_nb] = 0
+        print(f"✅ Cache étape {stage_nb} créé ({cache_size} séquences)")
     
     
-    def get_stage_batch(self, stage: int, batch_size: int):
+    def get_stage_batch(self, stage_nb: int, batch_size: int):
         """Récupère un batch pour l'étape spécifiée."""
-        if stage not in self.stage_caches:
-            self.initialize_stage_cache(stage)
+        if stage_nb not in self.stage_caches:
+            self.initialize_stage_cache(stage_nb)
         
-        cache = self.stage_caches[stage]
+        cache = self.stage_caches[stage_nb]
         batch = []
         
         for _ in range(batch_size):
-            batch.append(cache[self.current_indices[stage]])
-            self.current_indices[stage] = (self.current_indices[stage] + 1) % len(cache)
+            batch.append(cache[self.current_indices[stage_nb]])
+            self.current_indices[stage_nb] = (self.current_indices[stage_nb] + 1) % len(cache)
         
         return batch
     
     
-    def shuffle_stage_cache(self, stage: int):
+    def shuffle_stage_cache(self, stage_nb: int):
         """Mélange le cache d'une étape spécifique."""
-        if stage in self.stage_caches:
+        if stage_nb in self.stage_caches:
             import random
-            random.shuffle(self.stage_caches[stage])
+            random.shuffle(self.stage_caches[stage_nb])
     
     
-    def clear_stage_cache(self, stage: int):
+    def clear_stage_cache(self, stage_nb: int):
         """Libère la mémoire du cache d'une étape."""
-        if stage in self.stage_caches:
-            del self.stage_caches[stage]
-            del self.current_indices[stage]
-            print(f"🗑️  Cache étape {stage} libéré")
+        if stage_nb in self.stage_caches:
+            del self.stage_caches[stage_nb]
+            del self.current_indices[stage_nb]
+            print(f"🗑️  Cache étape {stage_nb} libéré")
 
 
 # =============================================================================
@@ -756,12 +606,12 @@ class ModularTrainer:
         self.updater = OptimizedNCAUpdater(model)
         
         # Optimiseur et planificateur
-        self.optimizer = optim.AdamW(model.parameters(), lr=cfg.LEARNING_RATE, weight_decay=1e-4)
+        self.optimizer = optim.AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
         self.loss_fn = nn.MSELoss()
         
         # Curriculum et métriques
         
-        self.curriculum = CurriculumScheduler(cfg.CONVERGENCE_THRESHOLDS)
+        self.curriculum = CurriculumScheduler(CONFIG.CONVERGENCE_THRESHOLDS)
         
         # Cache optimisé par étape
         self.sequence_cache = OptimizedSequenceCache(simulator)
@@ -769,14 +619,14 @@ class ModularTrainer:
         
         # État d'entraînement
         self.current_stage = 1
-        self.stage_histories = {stage: {'losses': [], 'epochs': [], 'lr': []} for stage in [1, 2, 3]}
+        self.stage_histories = {stage_nb: {'losses': [], 'epochs': [], 'lr': []} for stage_nb in [1, 2, 3]}
         self.global_history = {'losses': [], 'stages': [], 'epochs': []}
         self.stage_start_epochs = {}
         self.total_epochs_trained = 0
     
     
     def train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor,
-                   obstacle_mask: torch.Tensor, stage: int) -> float:
+                   obstacle_mask: torch.Tensor, stage_nb: int) -> float:
         """
         Un pas d'entraînement adapté à l'étape courante.
 
@@ -784,7 +634,7 @@ class ModularTrainer:
             target_sequence: Séquence cible
             source_mask: Masque des sources
             obstacle_mask: Masque des obstacles
-            stage: Étape courante d'entraînement
+            stage_nb: Étape courante d'entraînement
 
         Returns:
             Perte pour ce pas
@@ -793,24 +643,24 @@ class ModularTrainer:
         
         # Initialisation
         grid_pred = torch.zeros_like(target_sequence[0])
-        grid_pred[source_mask] = cfg.SOURCE_INTENSITY
+        grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
         
         total_loss = torch.tensor(0.0, device=DEVICE)
         
         # Déroulement temporel
-        for t_step in range(cfg.NCA_STEPS):
+        for t_step in range(CONFIG.NCA_STEPS):
             target = target_sequence[t_step + 1]
             grid_pred = self.updater.step(grid_pred, source_mask, obstacle_mask)
             
             # Perte pondérée selon l'étape
             step_loss = self.loss_fn(grid_pred, target)
             if self.curriculum:
-                weights = self.curriculum.get_stage_loss_weights(stage)
+                weights = self.curriculum.get_stage_loss_weights(stage_nb)
                 step_loss = step_loss * weights.get('mse', 1.0)
             
             total_loss = total_loss + step_loss
         
-        avg_loss = total_loss / cfg.NCA_STEPS
+        avg_loss = total_loss / CONFIG.NCA_STEPS
         
         # Backpropagation avec clipping
         avg_loss.backward()
@@ -820,28 +670,28 @@ class ModularTrainer:
         return avg_loss.item()
     
     
-    def train_stage(self, stage: int, max_epochs: int) -> Dict[str, Any]:
+    def train_stage(self, stage_nb: int, max_epochs: int) -> Dict[str, Any]:
         """
         Entraînement complet d'une étape spécifique.
 
         Args:
-            stage: Numéro d'étape (1, 2, ou 3)
+            stage_nb: Numéro d'étape (1, 2, ou 3)
             max_epochs: Nombre maximum d'époques pour cette étape
 
         Returns:
             Dictionnaire avec les métriques de l'étape
         """
-        print(f"\n🎯 === ÉTAPE {stage} - DÉBUT ===")
-        stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage]
+        print(f"\n🎯 === ÉTAPE {stage_nb} - DÉBUT ===")
+        stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage_nb]
         print(f"📋 {stage_name}")
         print(f"⏱️  Maximum {max_epochs} époques")
         
-        self.current_stage = stage
-        self.stage_start_epochs[stage] = self.total_epochs_trained
+        self.current_stage = stage_nb
+        self.stage_start_epochs[stage_nb] = self.total_epochs_trained
         
         # Initialisation du cache pour cette étape
         if self.use_cache:
-            self.sequence_cache.initialize_stage_cache(stage)
+            self.sequence_cache.initialize_stage_cache(stage_nb)
         
         # Métriques de l'étape
         stage_losses = []
@@ -854,21 +704,21 @@ class ModularTrainer:
             
             # Ajustement du learning rate si curriculum activé
             if self.curriculum:
-                self.curriculum.adjust_learning_rate(self.optimizer, stage, epoch_in_stage)
+                self.curriculum.adjust_learning_rate(self.optimizer, stage_nb, epoch_in_stage)
             
             # Mélange périodique du cache
             if self.use_cache and epoch_in_stage % 20 == 0:
-                self.sequence_cache.shuffle_stage_cache(stage)
+                self.sequence_cache.shuffle_stage_cache(stage_nb)
             
             # Entraînement par batch
-            for _ in range(cfg.BATCH_SIZE):
-                batch_sequences = self.sequence_cache.get_stage_batch(stage, 1)
+            for _ in range(CONFIG.BATCH_SIZE):
+                batch_sequences = self.sequence_cache.get_stage_batch(stage_nb, 1)
                 seq_data = batch_sequences[0]
                 target_seq = seq_data['target_seq']
                 source_mask = seq_data['source_mask']
                 obstacle_mask = seq_data['obstacle_mask']
                 
-                loss = self.train_step(target_seq, source_mask, obstacle_mask, stage)
+                loss = self.train_step(target_seq, source_mask, obstacle_mask, stage_nb)
                 epoch_losses.append(loss)
             
             # Statistiques de l'époque
@@ -877,12 +727,12 @@ class ModularTrainer:
             current_lr = self.optimizer.param_groups[0]['lr']
             
             # Historiques
-            self.stage_histories[stage]['losses'].append(avg_epoch_loss)
-            self.stage_histories[stage]['epochs'].append(epoch_in_stage)
-            self.stage_histories[stage]['lr'].append(current_lr)
+            self.stage_histories[stage_nb]['losses'].append(avg_epoch_loss)
+            self.stage_histories[stage_nb]['epochs'].append(epoch_in_stage)
+            self.stage_histories[stage_nb]['lr'].append(current_lr)
             
             self.global_history['losses'].append(avg_epoch_loss)
-            self.global_history['stages'].append(stage)
+            self.global_history['stages'].append(stage_nb)
             self.global_history['epochs'].append(self.total_epochs_trained)
             
             self.total_epochs_trained += 1
@@ -894,19 +744,19 @@ class ModularTrainer:
                       f"LR: {current_lr:.2e}")
             
             # Vérification de l'avancement automatique (curriculum)
-            if self.curriculum.should_advance_stage(stage, stage_losses):
+            if self.curriculum.should_advance_stage(stage_nb, stage_losses):
                 print(f"🎯 Convergence atteinte à l'époque {epoch_in_stage}")
-                print(f"   Seuil: {cfg.CONVERGENCE_THRESHOLDS[stage]:.3f}, "
+                print(f"   Seuil: {CONFIG.CONVERGENCE_THRESHOLDS[stage_nb]:.3f}, "
                       f"Loss: {avg_epoch_loss:.6f}")
                 early_stop = True
                 break
         
         # Résumé de l'étape
         final_loss = stage_losses[-1] if stage_losses else float('inf')
-        convergence_met = final_loss < cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
+        convergence_met = final_loss < CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
         
         stage_metrics = {
-            'stage':           stage,
+            'stage_nb':        stage_nb,
             'epochs_trained':  epoch_in_stage + 1,
             'final_loss':      final_loss,
             'convergence_met': convergence_met,
@@ -914,18 +764,18 @@ class ModularTrainer:
             'loss_history':    stage_losses
         }
         
-        print(f"✅ === ÉTAPE {stage} - TERMINÉE ===")
+        print(f"✅ === ÉTAPE {stage_nb} - TERMINÉE ===")
         print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
         print(f"📉 Perte finale: {final_loss:.6f}")
         print(f"🎯 Convergence: {'✅ OUI' if convergence_met else '❌ NON'}")
         print(f"⚡ Arrêt précoce: {'✅ OUI' if early_stop else '❌ NON'}")
         
         # Sauvegarde du checkpoint d'étape
-        self.save_stage_checkpoint(stage, stage_metrics)
+        self.save_stage_checkpoint(stage_nb, stage_metrics)
         
         # Libération du cache de l'étape précédente pour économiser la mémoire
-        if self.use_cache and stage > 1:
-            self.sequence_cache.clear_stage_cache(stage - 1)
+        if self.use_cache and stage_nb > 1:
+            self.sequence_cache.clear_stage_cache(stage_nb - 1)
         
         return stage_metrics
     
@@ -939,8 +789,8 @@ class ModularTrainer:
         """
         print(f"\n🚀 === DÉBUT ENTRAÎNEMENT MODULAIRE ===")
         print(f"🎯 Seed: {SEED}")
-        print(f"📊 Époques totales prévues: {cfg.TOTAL_EPOCHS}")
-        print(f"🔄 Étapes: {cfg.STAGE_1_EPOCHS} + {cfg.STAGE_2_EPOCHS} + {cfg.STAGE_3_EPOCHS}")
+        print(f"📊 Époques totales prévues: {CONFIG.TOTAL_EPOCHS}")
+        print(f"🔄 Étapes: {CONFIG.STAGE_1_EPOCHS} + {CONFIG.STAGE_2_EPOCHS} + {CONFIG.STAGE_3_EPOCHS}")
         
         start_time = time.time()
         self.model.train()
@@ -949,15 +799,15 @@ class ModularTrainer:
         all_stage_metrics = {}
         
         # ÉTAPE 1: Sans obstacles
-        stage_1_metrics = self.train_stage(1, cfg.STAGE_1_EPOCHS)
+        stage_1_metrics = self.train_stage(1, CONFIG.STAGE_1_EPOCHS)
         all_stage_metrics[1] = stage_1_metrics
         
         # ÉTAPE 2: Un obstacle
-        stage_2_metrics = self.train_stage(2, cfg.STAGE_2_EPOCHS)
+        stage_2_metrics = self.train_stage(2, CONFIG.STAGE_2_EPOCHS)
         all_stage_metrics[2] = stage_2_metrics
         
         # ÉTAPE 3: Obstacles multiples
-        stage_3_metrics = self.train_stage(3, cfg.STAGE_3_EPOCHS)
+        stage_3_metrics = self.train_stage(3, CONFIG.STAGE_3_EPOCHS)
         all_stage_metrics[3] = stage_3_metrics
         
         # Métriques globales
@@ -965,7 +815,7 @@ class ModularTrainer:
         total_epochs_actual = sum(metrics['epochs_trained'] for metrics in all_stage_metrics.values())
         
         global_metrics = {
-            'total_epochs_planned': cfg.TOTAL_EPOCHS,
+            'total_epochs_planned': CONFIG.TOTAL_EPOCHS,
             'total_epochs_actual':  total_epochs_actual,
             'total_time_seconds':   total_time,
             'total_time_formatted': f"{total_time / 60:.1f} min",
@@ -979,7 +829,7 @@ class ModularTrainer:
         
         print(f"\n🎉 === ENTRAÎNEMENT MODULAIRE TERMINÉ ===")
         print(f"⏱️  Temps total: {total_time / 60:.1f} minutes")
-        print(f"📊 Époques totales: {total_epochs_actual}/{cfg.TOTAL_EPOCHS}")
+        print(f"📊 Époques totales: {total_epochs_actual}/{CONFIG.TOTAL_EPOCHS}")
         print(f"🎯 Toutes étapes convergées: {'✅ OUI' if global_metrics['all_stages_converged'] else '❌ NON'}")
         print(f"📉 Perte finale: {global_metrics['final_loss']:.6f}")
         
@@ -989,9 +839,9 @@ class ModularTrainer:
         return global_metrics
     
     
-    def save_stage_checkpoint(self, stage: int, metrics: Dict[str, Any]):
+    def save_stage_checkpoint(self, stage_nb: int, metrics: Dict[str, Any]):
         """Sauvegarde le checkpoint d'une étape."""
-        stage_dir = Path(cfg.OUTPUT_DIR) / f"stage_{stage}"
+        stage_dir = Path(CONFIG.OUTPUT_DIR) / f"stage_{stage_nb}"
         stage_dir.mkdir(parents=True, exist_ok=True)
         
         # Sauvegarde du modèle
@@ -999,9 +849,9 @@ class ModularTrainer:
         torch.save({
             'model_state_dict':     self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'stage':                stage,
+            'stage_nb':             stage_nb,
             'metrics':              metrics,
-            'config':               cfg.__dict__
+            'config':               CONFIG.__dict__
         }, model_path)
         
         # Sauvegarde des métriques en JSON
@@ -1009,26 +859,26 @@ class ModularTrainer:
         with open(metrics_path, 'w') as f:
             json.dump(metrics, f, indent=2, default=str)
         
-        print(f"💾 Checkpoint étape {stage} sauvegardé: {stage_dir}")
+        print(f"💾 Checkpoint étape {stage_nb} sauvegardé: {stage_dir}")
     
     
     def save_final_model(self, global_metrics: Dict[str, Any]):
         """Sauvegarde le modèle final et toutes les métriques."""
         # Modèle final
-        final_model_path = Path(cfg.OUTPUT_DIR) / "final_model.pth"
+        final_model_path = Path(CONFIG.OUTPUT_DIR) / "final_model.pth"
         torch.save({
             'model_state_dict':     self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'global_metrics':       global_metrics,
-            'config':               cfg.__dict__
+            'config':               CONFIG.__dict__
         }, final_model_path)
         
         # Métriques complètes
-        full_metrics_path = Path(cfg.OUTPUT_DIR) / "complete_metrics.json"
+        full_metrics_path = Path(CONFIG.OUTPUT_DIR) / "complete_metrics.json"
         with open(full_metrics_path, 'w') as f:
             json.dump(global_metrics, f, indent=2, default=str)
         
-        print(f"💾 Modèle final et métriques sauvegardés: {cfg.OUTPUT_DIR}")
+        print(f"💾 Modèle final et métriques sauvegardés: {CONFIG.OUTPUT_DIR}")
 
 
 # =============================================================================
@@ -1042,31 +892,30 @@ class ProgressiveVisualizer:
     """
     
     
-    def __init__(self, interactive: bool = interactive_mode):
-        self.interactive = interactive
+    def __init__(self):
         self.frame_data = {}  # Données par étape
     
     
-    def visualize_stage_results(self, model: ImprovedNCA, stage: int) -> None:
+    def visualize_stage_results(self, model: ImprovedNCA, stage_nb: int) -> None:
         """
         Visualise les résultats d'une étape spécifique.
 
         Args:
             model: Modèle NCA entraîné
-            stage: Numéro d'étape à visualiser
+            stage_nb: Numéro d'étape à visualiser
         Returns:
             Dictionnaire avec les données de visualisation
         """
-        print(f"\n🎨 Génération des visualisations pour l'étape {stage}...")
+        print(f"\n🎨 Génération des visualisations pour l'étape {stage_nb}...")
         
         # Génération de la séquence de test avec seed fixe
         torch.manual_seed(VISUALIZATION_SEED)
         np.random.seed(VISUALIZATION_SEED)
         
         target_seq, source_mask, obstacle_mask = simulator.generate_stage_sequence(
-                stage=stage,
-                n_steps=cfg.POSTVIS_STEPS,
-                size=cfg.GRID_SIZE
+                stage_nb=stage_nb,
+                n_steps=CONFIG.POSTVIS_STEPS,
+                size=CONFIG.GRID_SIZE
         )
         
         # Prédiction du modèle
@@ -1076,17 +925,17 @@ class ProgressiveVisualizer:
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
         nca_sequence = []
         grid_pred = torch.zeros_like(target_seq[0])
-        grid_pred[source_mask] = cfg.SOURCE_INTENSITY
+        grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
         nca_sequence.append(grid_pred.clone())
         
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
-            for _ in range(cfg.POSTVIS_STEPS):
+            for _ in range(CONFIG.POSTVIS_STEPS):
                 grid_pred = updater.step(grid_pred, source_mask, obstacle_mask)
                 nca_sequence.append(grid_pred.clone())
         
         # Création des visualisations avec .detach() pour sécurité
         vis_data = {
-            'stage':           stage,
+            'stage_nb':        stage_nb,
             'target_sequence': [t.detach().cpu().numpy() for t in target_seq],
             'nca_sequence':    [t.detach().cpu().numpy() for t in nca_sequence],
             'source_mask':     source_mask.detach().cpu().numpy(),
@@ -1104,8 +953,8 @@ class ProgressiveVisualizer:
     
     def _create_stage_animations(self, vis_data: Dict[str, Any]):
         """Crée les animations GIF pour une étape."""
-        stage = vis_data['stage']
-        stage_dir = Path(cfg.OUTPUT_DIR) / f"stage_{stage}"
+        stage_nb = vis_data['stage_nb']
+        stage_dir = Path(CONFIG.OUTPUT_DIR) / f"stage_{stage_nb}"
         stage_dir.mkdir(parents=True, exist_ok=True)
         
         # Animation comparative
@@ -1113,25 +962,25 @@ class ProgressiveVisualizer:
                 vis_data['target_sequence'],
                 vis_data['nca_sequence'],
                 vis_data['obstacle_mask'],
-                stage_dir / f"animation_comparaison_étape_{stage}.gif",
-                f"Étape {stage} - Comparaison Cible vs NCA"
+                stage_dir / f"animation_comparaison_étape_{stage_nb}.gif",
+                f"Étape {stage_nb} - Comparaison Cible vs NCA"
         )
         
         # Animation NCA seule
         self._save_single_gif(
                 vis_data['nca_sequence'],
                 vis_data['obstacle_mask'],
-                stage_dir / f"animation_nca_étape_{stage}.gif",
-                f"Étape {stage} - Prédiction NCA"
+                stage_dir / f"animation_nca_étape_{stage_nb}.gif",
+                f"Étape {stage_nb} - Prédiction NCA"
         )
         
-        print(f"✅ Animations étape {stage} sauvegardées dans {stage_dir}")
+        print(f"✅ Animations étape {stage_nb} sauvegardées dans {stage_dir}")
     
     
     def _create_stage_convergence_plot(self, vis_data: Dict[str, Any]):
         """Crée le graphique de convergence pour une étape."""
-        stage = vis_data['stage']
-        stage_dir = Path(cfg.OUTPUT_DIR) / f"stage_{stage}"
+        stage_nb = vis_data['stage_nb']
+        stage_dir = Path(CONFIG.OUTPUT_DIR) / f"stage_{stage_nb}"
         
         target_seq = vis_data['target_sequence']
         nca_seq = vis_data['nca_sequence']
@@ -1145,21 +994,21 @@ class ProgressiveVisualizer:
         # Graphique
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(errors, 'b-', linewidth=2, label='Erreur MSE')
-        ax.axhline(y=cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05),
-                   color='r', linestyle='--', label=f'Seuil convergence étape {stage}')
+        ax.axhline(y=CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05),
+                   color='r', linestyle='--', label=f'Seuil convergence étape {stage_nb}')
         
         ax.set_xlabel('Pas de temps')
         ax.set_ylabel('Erreur MSE')
-        ax.set_title(f'Convergence Étape {stage} - Seed {vis_data["vis_seed"]}')
+        ax.set_title(f'Convergence Étape {stage_nb} - Seed {vis_data["vis_seed"]}')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        convergence_path = stage_dir / f"convergence_étape_{stage}.png"
+        convergence_path = stage_dir / f"convergence_étape_{stage_nb}.png"
         plt.savefig(convergence_path, dpi=150, bbox_inches='tight')
         plt.close()
         
-        print(f"✅ Graphique de convergence étape {stage} sauvegardé: {convergence_path}")
+        print(f"✅ Graphique de convergence étape {stage_nb} sauvegardé: {convergence_path}")
     
     
     def _save_comparison_gif(self, target_seq: List[np.ndarray], nca_seq: List[np.ndarray],
@@ -1247,23 +1096,23 @@ class ProgressiveVisualizer:
         
         stage_colors = {1: 'green', 2: 'orange', 3: 'red'}
         
-        for stage in [1, 2, 3]:
-            stage_indices = [i for i, s in enumerate(stages) if s == stage]
+        for stage_nb in [1, 2, 3]:
+            stage_indices = [i for i, s in enumerate(stages) if s == stage_nb]
             stage_losses = [losses[i] for i in stage_indices]
             stage_epochs = [epochs[i] for i in stage_indices]
             
             if stage_losses:
                 ax1.plot(stage_epochs, stage_losses,
-                         color=stage_colors[stage],
-                         label=f'Étape {stage}',
+                         color=stage_colors[stage_nb],
+                         label=f'Étape {stage_nb}',
                          linewidth=2)
         
         # Seuils de convergence
-        for stage in [1, 2, 3]:
-            threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
-            ax1.axhline(y=threshold, color=stage_colors[stage],
+        for stage_nb in [1, 2, 3]:
+            threshold = CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
+            ax1.axhline(y=threshold, color=stage_colors[stage_nb],
                         linestyle='--', alpha=0.7,
-                        label=f'Seuil étape {stage}')
+                        label=f'Seuil étape {stage_nb}')
         
         ax1.set_xlabel('Époque')
         ax1.set_ylabel('Perte MSE')
@@ -1273,14 +1122,14 @@ class ProgressiveVisualizer:
         ax1.set_yscale('log')
         
         # Learning rate par étape
-        for stage in [1, 2, 3]:
-            stage_history = metrics['stage_histories'][stage]
+        for stage_nb in [1, 2, 3]:
+            stage_history = metrics['stage_histories'][stage_nb]
             if stage_history['lr']:
-                stage_epochs_local = [metrics['stage_start_epochs'].get(stage, 0) + e
+                stage_epochs_local = [metrics['stage_start_epochs'].get(stage_nb, 0) + e
                                       for e in stage_history['epochs']]
                 ax2.plot(stage_epochs_local, stage_history['lr'],
-                         color=stage_colors[stage],
-                         label=f'LR Étape {stage}',
+                         color=stage_colors[stage_nb],
+                         label=f'LR Étape {stage_nb}',
                          linewidth=2)
         
         ax2.set_xlabel('Époque')
@@ -1291,31 +1140,31 @@ class ProgressiveVisualizer:
         ax2.set_yscale('log')
         
         # Accélération du Learning Rate (dérivée seconde) pour détecter les changements d'accélération
-        for stage in [1, 2, 3]:
-            stage_history = metrics['stage_histories'][stage]
+        for stage_nb in [1, 2, 3]:
+            stage_history = metrics['stage_histories'][stage_nb]
             if stage_history['lr'] and len(stage_history['lr']) > 2:  # Besoin d'au moins 3 points pour dérivée seconde
                 # Calcul de la dérivée première (vitesse)
                 lr_values = stage_history['lr']
                 lr_velocity = []
                 
                 for i in range(1, len(lr_values)):
-                    velocity = lr_values[i] - lr_values[i-1]
+                    velocity = lr_values[i] - lr_values[i - 1]
                     lr_velocity.append(velocity)
                 
                 # Calcul de la dérivée seconde (accélération de l'accélération)
                 lr_acceleration = []
                 for i in range(1, len(lr_velocity)):
-                    acceleration = lr_velocity[i] - lr_velocity[i-1]
+                    acceleration = lr_velocity[i] - lr_velocity[i - 1]
                     lr_acceleration.append(acceleration)
                 
                 # Époques correspondantes (on commence à l'époque 2 car on a besoin de 3 points pour la dérivée seconde)
-                stage_epochs_acceleration = [metrics['stage_start_epochs'].get(stage, 0) + e
-                                           for e in stage_history['epochs'][2:]]
+                stage_epochs_acceleration = [metrics['stage_start_epochs'].get(stage_nb, 0) + e
+                                             for e in stage_history['epochs'][2:]]
                 
                 if lr_acceleration:
                     ax3.plot(stage_epochs_acceleration, lr_acceleration,
-                             color=stage_colors[stage],
-                             label=f'Accélération LR Étape {stage}',
+                             color=stage_colors[stage_nb],
+                             label=f'Accélération LR Étape {stage_nb}',
                              linewidth=2,
                              marker='o', markersize=3, alpha=0.7)
                     
@@ -1326,17 +1175,17 @@ class ProgressiveVisualizer:
                     negative_mask = [a < 0 for a in lr_acceleration]
                     if any(negative_mask):
                         ax3.fill_between(stage_epochs_acceleration, lr_acceleration, 0,
-                                       where=negative_mask,
-                                       alpha=0.2, color='red',
-                                       label='Zone de décélération' if stage == 1 else "")
+                                         where=negative_mask,
+                                         alpha=0.2, color='red',
+                                         label='Zone de décélération' if stage_nb == 1 else "")
                     
                     # Zone positive (accélération croissante) en vert transparent
                     positive_mask = [a > 0 for a in lr_acceleration]
                     if any(positive_mask):
                         ax3.fill_between(stage_epochs_acceleration, lr_acceleration, 0,
-                                       where=positive_mask,
-                                       alpha=0.2, color='green',
-                                       label='Zone d\'accélération' if stage == 1 else "")
+                                         where=positive_mask,
+                                         alpha=0.2, color='green',
+                                         label='Zone d\'accélération' if stage_nb == 1 else "")
                     
                     # Détection et marquage des points d'inflexion
                     inflection_points_epochs = []
@@ -1344,7 +1193,7 @@ class ProgressiveVisualizer:
                     
                     for i in range(1, len(lr_acceleration)):
                         # Point d'inflexion = changement de signe dans l'accélération
-                        prev_accel = lr_acceleration[i-1]
+                        prev_accel = lr_acceleration[i - 1]
                         curr_accel = lr_acceleration[i]
                         
                         # Vérifier si on traverse zéro (changement de signe)
@@ -1359,29 +1208,29 @@ class ProgressiveVisualizer:
                     # Marquer les points d'inflexion sur le graphique
                     if inflection_points_epochs:
                         ax3.scatter(inflection_points_epochs, inflection_points_values,
-                                  color=stage_colors[stage],
-                                  s=80, marker='X',
-                                  edgecolors='black', linewidth=2,
-                                  label=f'Points d\'inflexion Étape {stage}' if stage == 1 else "",
-                                  zorder=5, alpha=0.9)
+                                    color=stage_colors[stage_nb],
+                                    s=80, marker='X',
+                                    edgecolors='black', linewidth=2,
+                                    label=f'Points d\'inflexion Étape {stage_nb}' if stage_nb == 1 else "",
+                                    zorder=5, alpha=0.9)
                         
                         # Annotations pour les points d'inflexion les plus significatifs
                         for i, (epoch, value) in enumerate(zip(inflection_points_epochs, inflection_points_values)):
                             if i < 3:  # Limite à 3 annotations par étape pour éviter l'encombrement
                                 ax3.annotate(f'Inflexion\nÉ{epoch}',
-                                           xy=(epoch, value),
-                                           xytext=(10, 20 if value > 0 else -30),
-                                           textcoords='offset points',
-                                           fontsize=8,
-                                           color=stage_colors[stage],
-                                           bbox=dict(boxstyle='round,pad=0.3',
-                                                   facecolor='white',
-                                                   edgecolor=stage_colors[stage],
-                                                   alpha=0.8),
-                                           arrowprops=dict(arrowstyle='->',
-                                                         connectionstyle='arc3,rad=0.2',
-                                                         color=stage_colors[stage],
-                                                         alpha=0.7))
+                                             xy=(epoch, value),
+                                             xytext=(10, 20 if value > 0 else -30),
+                                             textcoords='offset points',
+                                             fontsize=8,
+                                             color=stage_colors[stage_nb],
+                                             bbox=dict(boxstyle='round,pad=0.3',
+                                                       facecolor='white',
+                                                       edgecolor=stage_colors[stage_nb],
+                                                       alpha=0.8),
+                                             arrowprops=dict(arrowstyle='->',
+                                                             connectionstyle='arc3,rad=0.2',
+                                                             color=stage_colors[stage_nb],
+                                                             alpha=0.7))
         
         ax3.set_xlabel('Époque')
         ax3.set_ylabel('Accélération LR (Δ²LR par époque²)')
@@ -1391,18 +1240,18 @@ class ProgressiveVisualizer:
         
         # Annotation explicative pour interpréter le graphique d'accélération avec points d'inflexion
         ax3.text(0.02, 0.98,
-                'Valeurs négatives = LR décélère (ralentissement qui s\'accélère)\n'
-                'Valeurs positives = LR accélère (accélération qui s\'intensifie)\n'
-                'Valeurs proches de 0 = Vitesse LR constante (accélération stable)\n'
-                'X = Points d\'inflexion (changements de dynamique du LR)\n'
-                'Les points d\'inflexion indiquent des changements de politique d\'optimisation',
-                transform=ax3.transAxes,
-                fontsize=9,
-                verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                 'Valeurs négatives = LR décélère (ralentissement qui s\'accélère)\n'
+                 'Valeurs positives = LR accélère (accélération qui s\'intensifie)\n'
+                 'Valeurs proches de 0 = Vitesse LR constante (accélération stable)\n'
+                 'X = Points d\'inflexion (changements de dynamique du LR)\n'
+                 'Les points d\'inflexion indiquent des changements de politique d\'optimisation',
+                 transform=ax3.transAxes,
+                 fontsize=9,
+                 verticalalignment='top',
+                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
         
         plt.tight_layout()
-        plt.savefig(Path(cfg.OUTPUT_DIR) / "curriculum_progression.png",
+        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "curriculum_progression.png",
                     dpi=150, bbox_inches='tight')
         plt.close()
     
@@ -1431,7 +1280,7 @@ class ProgressiveVisualizer:
         
         # Époques utilisées par étape
         epochs_used = [metrics['stage_metrics'][s]['epochs_trained'] for s in stages]
-        epochs_planned = [cfg.STAGE_1_EPOCHS, cfg.STAGE_2_EPOCHS, cfg.STAGE_3_EPOCHS]
+        epochs_planned = [CONFIG.STAGE_1_EPOCHS, CONFIG.STAGE_2_EPOCHS, CONFIG.STAGE_3_EPOCHS]
         
         x = np.arange(len(stages))
         width = 0.35
@@ -1448,9 +1297,9 @@ class ProgressiveVisualizer:
         
         # Temps de convergence
         convergence_times = []
-        for stage in stages:
-            stage_losses = metrics['stage_metrics'][stage]['loss_history']
-            threshold = cfg.CONVERGENCE_THRESHOLDS.get(stage, 0.05)
+        for stage_nb in stages:
+            stage_losses = metrics['stage_metrics'][stage_nb]['loss_history']
+            threshold = CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
             
             convergence_epoch = None
             for i, loss in enumerate(stage_losses):
@@ -1475,7 +1324,7 @@ class ProgressiveVisualizer:
         ax4.set_title('Efficacité d\'Apprentissage par Étape')
         
         plt.tight_layout()
-        plt.savefig(Path(cfg.OUTPUT_DIR) / "stage_comparison.png",
+        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "stage_comparison.png",
                     dpi=150, bbox_inches='tight')
         plt.close()
     
@@ -1496,18 +1345,18 @@ class ProgressiveVisualizer:
 📊 STATISTIQUES GLOBALES:
    • Seed: {SEED}
    • Temps total: {total_time / 60:.1f} minutes ({total_time:.1f}s)
-   • Époques totales: {total_epochs}/{cfg.TOTAL_EPOCHS}
+   • Époques totales: {total_epochs}
    • Toutes étapes convergées: {'✅ OUI' if all_converged else '❌ NON'}
    • Perte finale: {final_loss:.6f}
 
 🏆 PERFORMANCE PAR ÉTAPE:"""
         
-        for stage in [1, 2, 3]:
-            stage_data = metrics['stage_metrics'][stage]
-            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage]
+        for stage_nb in [1, 2, 3]:
+            stage_data = metrics['stage_metrics'][stage_nb]
+            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage_nb]
             
             summary_text += f"""
-   • Étape {stage} ({stage_name}):
+   • Étape {stage_nb} ({stage_name}):
      - Époques: {stage_data['epochs_trained']} (convergée: {'✅' if stage_data['convergence_met'] else '❌'})
      - Perte finale: {stage_data['final_loss']:.6f}
      - Arrêt précoce: {'✅' if stage_data['early_stopped'] else '❌'}"""
@@ -1515,10 +1364,10 @@ class ProgressiveVisualizer:
         summary_text += f"""
 
 📈 ARCHITECTURE:
-   • Taille grille: {cfg.GRID_SIZE}x{cfg.GRID_SIZE}
-   • Couches cachées: {cfg.HIDDEN_SIZE} neurones, {cfg.N_LAYERS} couches
-   • Pas temporels NCA: {cfg.NCA_STEPS}
-   • Taille batch: {cfg.BATCH_SIZE}
+   • Taille grille: {CONFIG.GRID_SIZE}x{CONFIG.GRID_SIZE}
+   • Couches cachées: {CONFIG.HIDDEN_SIZE} neurones, {CONFIG.N_LAYERS} couches
+   • Pas temporels NCA: {CONFIG.NCA_STEPS}
+   • Taille batch: {CONFIG.BATCH_SIZE}
         """
         
         ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
@@ -1532,7 +1381,7 @@ class ProgressiveVisualizer:
                      fontsize=14, fontweight='bold')
         
         plt.tight_layout()
-        plt.savefig(Path(cfg.OUTPUT_DIR) / "performance_summary.png",
+        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "performance_summary.png",
                     dpi=150, bbox_inches='tight')
         plt.close()
 
@@ -1555,8 +1404,6 @@ def main():
         print("\n🔧 Initialisation du modèle...")
         model = ImprovedNCA(
                 input_size=11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
-                hidden_size=cfg.HIDDEN_SIZE,
-                n_layers=cfg.N_LAYERS
         ).to(DEVICE)
         
         print(f"📊 Paramètres du modèle: {sum(p.numel() for p in model.parameters()):,}")
@@ -1571,11 +1418,11 @@ def main():
         
         # Génération des visualisations progressives
         print("\n🎨 Génération des visualisations...")
-        visualizer = ProgressiveVisualizer(interactive_mode)
+        visualizer = ProgressiveVisualizer()
         
         # Visualisation par étape avec le modèle final
-        for stage in [1, 2, 3]:
-            visualizer.visualize_stage_results(model, stage)
+        for stage_nb in [1, 2, 3]:
+            visualizer.visualize_stage_results(model, stage_nb)
         
         # Résumé visuel complet du curriculum
         visualizer.create_curriculum_summary(global_metrics)
@@ -1584,7 +1431,7 @@ def main():
         print(f"\n" + "=" * 80)
         print(f"🎉 ENTRAÎNEMENT MODULAIRE TERMINÉ AVEC SUCCÈS!")
         print(f"=" * 80)
-        print(f"📁 Résultats sauvegardés dans: {cfg.OUTPUT_DIR}")
+        print(f"📁 Résultats sauvegardés dans: {CONFIG.OUTPUT_DIR}")
         print(f"⏱️  Temps total: {global_metrics['total_time_formatted']}")
         print(f"📊 Époques: {global_metrics['total_epochs_actual']}/{global_metrics['total_epochs_planned']}")
         print(f"🎯 Convergence: {'✅ TOUTES' if global_metrics['all_stages_converged'] else '❌ PARTIELLE'}")
@@ -1592,11 +1439,11 @@ def main():
         
         # Détail par étape
         print(f"\n📋 DÉTAIL PAR ÉTAPE:")
-        for stage in [1, 2, 3]:
-            stage_data = global_metrics['stage_metrics'][stage]
-            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage]
+        for stage_nb in [1, 2, 3]:
+            stage_data = global_metrics['stage_metrics'][stage_nb]
+            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage_nb]
             status = "✅ CONVERGÉE" if stage_data['convergence_met'] else "❌ NON CONVERGÉE"
-            print(f"   Étape {stage} ({stage_name}): {status} - {stage_data['final_loss']:.6f}")
+            print(f"   Étape {stage_nb} ({stage_name}): {status} - {stage_data['final_loss']:.6f}")
         
         print(f"\n🎨 Fichiers de visualisation générés:")
         print(f"   • Animations par étape: stage_X/")
