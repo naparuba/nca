@@ -767,7 +767,8 @@ class ModularTrainer:
         print(f"⚡ Arrêt précoce: {'✅ OUI' if early_stop else '❌ NON'}")
         
         # Sauvegarde du checkpoint d'étape
-        self.save_stage_checkpoint(stage_nb, stage_metrics)
+        stage = STAGE_MANAGER.get_stage(stage_nb)
+        stage.save_stage_checkpoint(stage_metrics, self.model.state_dict(), self.optimizer.state_dict())
         
         # Libération du cache de l'étape précédente pour économiser la mémoire
         if self.use_cache and stage_nb > 1:
@@ -831,29 +832,6 @@ class ModularTrainer:
         self.save_final_model(global_metrics)
         
         return global_metrics
-    
-    
-    def save_stage_checkpoint(self, stage_nb: int, metrics: Dict[str, Any]):
-        """Sauvegarde le checkpoint d'une étape."""
-        stage_dir = Path(CONFIG.OUTPUT_DIR) / f"stage_{stage_nb}"
-        stage_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Sauvegarde du modèle
-        model_path = stage_dir / "model_checkpoint.pth"
-        torch.save({
-            'model_state_dict':     self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'stage_nb':             stage_nb,
-            'metrics':              metrics,
-            'config':               CONFIG.__dict__
-        }, model_path)
-        
-        # Sauvegarde des métriques en JSON
-        metrics_path = stage_dir / "metrics.json"
-        with open(metrics_path, 'w') as f:
-            json.dump(metrics, f, indent=2, default=str)
-        
-        print(f"💾 Checkpoint étape {stage_nb} sauvegardé: {stage_dir}")
     
     
     def save_final_model(self, global_metrics: Dict[str, Any]):
