@@ -72,7 +72,7 @@ class ProgressiveObstacleManager:
         """
         
         stage = STAGE_MANAGER.get_stage(stage_nb)
-        #print(f"🎯 Génération d'environnement pour l'étape {stage_nb} ({stage.get_name()})...")
+        # print(f"🎯 Génération d'environnement pour l'étape {stage_nb} ({stage.get_name()})...")
         
         return stage.generate_environment(size, source_pos)
         # if stage_nb == 1:
@@ -444,8 +444,7 @@ class CurriculumScheduler:
     """
     
     
-    def __init__(self, convergence_thresholds: Dict[int, float], patience: int = 10):
-        self.thresholds = convergence_thresholds
+    def __init__(self, patience: int):
         self.patience = patience
         self.stage_metrics_history = {stage_nb: [] for stage_nb in [1, 2, 3]}
         self.no_improvement_counts = {stage_nb: 0 for stage_nb in [1, 2, 3]}
@@ -611,7 +610,7 @@ class ModularTrainer:
         
         # Curriculum et métriques
         
-        self.curriculum = CurriculumScheduler(CONFIG.CONVERGENCE_THRESHOLDS)
+        self.curriculum = CurriculumScheduler(CONFIG.STAGNATION_PATIENCE)
         
         # Cache optimisé par étape
         self.sequence_cache = OptimizedSequenceCache(simulator)
@@ -746,28 +745,25 @@ class ModularTrainer:
             # Vérification de l'avancement automatique (curriculum)
             if self.curriculum.should_advance_stage(stage_nb, stage_losses):
                 print(f"🎯 Convergence atteinte à l'époque {epoch_in_stage}")
-                print(f"   Seuil: {CONFIG.CONVERGENCE_THRESHOLDS[stage_nb]:.3f}, "
-                      f"Loss: {avg_epoch_loss:.6f}")
+                print(f"   Loss: {avg_epoch_loss:.6f}")
                 early_stop = True
                 break
         
         # Résumé de l'étape
         final_loss = stage_losses[-1] if stage_losses else float('inf')
-        convergence_met = final_loss < CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
+        # convergence_met = final_loss < CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
         
         stage_metrics = {
-            'stage_nb':        stage_nb,
-            'epochs_trained':  epoch_in_stage + 1,
-            'final_loss':      final_loss,
-            'convergence_met': convergence_met,
-            'early_stopped':   early_stop,
-            'loss_history':    stage_losses
+            'stage_nb':       stage_nb,
+            'epochs_trained': epoch_in_stage + 1,
+            'final_loss':     final_loss,
+            'early_stopped':  early_stop,
+            'loss_history':   stage_losses
         }
         
         print(f"✅ === ÉTAPE {stage_nb} - TERMINÉE ===")
         print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
         print(f"📉 Perte finale: {final_loss:.6f}")
-        print(f"🎯 Convergence: {'✅ OUI' if convergence_met else '❌ NON'}")
         print(f"⚡ Arrêt précoce: {'✅ OUI' if early_stop else '❌ NON'}")
         
         # Sauvegarde du checkpoint d'étape
@@ -821,7 +817,6 @@ class ModularTrainer:
             'total_time_formatted': f"{total_time / 60:.1f} min",
             'stage_metrics':        all_stage_metrics,
             'final_loss':           stage_3_metrics['final_loss'],
-            'all_stages_converged': all(m['convergence_met'] for m in all_stage_metrics.values()),
             'global_history':       self.global_history,
             'stage_histories':      self.stage_histories,
             'stage_start_epochs':   self.stage_start_epochs  # AJOUT de la clé manquante
@@ -830,7 +825,6 @@ class ModularTrainer:
         print(f"\n🎉 === ENTRAÎNEMENT MODULAIRE TERMINÉ ===")
         print(f"⏱️  Temps total: {total_time / 60:.1f} minutes")
         print(f"📊 Époques totales: {total_epochs_actual}/{CONFIG.TOTAL_EPOCHS}")
-        print(f"🎯 Toutes étapes convergées: {'✅ OUI' if global_metrics['all_stages_converged'] else '❌ NON'}")
         print(f"📉 Perte finale: {global_metrics['final_loss']:.6f}")
         
         # Sauvegarde du modèle final et des métriques
@@ -994,8 +988,6 @@ class ProgressiveVisualizer:
         # Graphique
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.plot(errors, 'b-', linewidth=2, label='Erreur MSE')
-        ax.axhline(y=CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05),
-                   color='r', linestyle='--', label=f'Seuil convergence étape {stage_nb}')
         
         ax.set_xlabel('Pas de temps')
         ax.set_ylabel('Erreur MSE')
@@ -1106,13 +1098,6 @@ class ProgressiveVisualizer:
                          color=stage_colors[stage_nb],
                          label=f'Étape {stage_nb}',
                          linewidth=2)
-        
-        # Seuils de convergence
-        for stage_nb in [1, 2, 3]:
-            threshold = CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
-            ax1.axhline(y=threshold, color=stage_colors[stage_nb],
-                        linestyle='--', alpha=0.7,
-                        label=f'Seuil étape {stage_nb}')
         
         ax1.set_xlabel('Époque')
         ax1.set_ylabel('Perte MSE')
@@ -1262,17 +1247,6 @@ class ProgressiveVisualizer:
         
         stages = [1, 2, 3]
         stage_names = ["Sans obstacles", "Un obstacle", "Obstacles multiples"]
-        stage_colors = ['green', 'orange', 'red']
-        
-        # Pertes finales par étape
-        final_losses = [metrics['stage_metrics'][s]['final_loss'] for s in stages]
-        convergence_status = [metrics['stage_metrics'][s]['convergence_met'] for s in stages]
-        
-        bars = ax1.bar(stage_names, final_losses, color=stage_colors, alpha=0.7)
-        for i, (bar, converged) in enumerate(zip(bars, convergence_status)):
-            if converged:
-                bar.set_edgecolor('darkgreen')
-                bar.set_linewidth(3)
         
         ax1.set_ylabel('Perte finale')
         ax1.set_title('Perte Finale par Étape')
@@ -1299,29 +1273,13 @@ class ProgressiveVisualizer:
         convergence_times = []
         for stage_nb in stages:
             stage_losses = metrics['stage_metrics'][stage_nb]['loss_history']
-            threshold = CONFIG.CONVERGENCE_THRESHOLDS.get(stage_nb, 0.05)
-            
-            convergence_epoch = None
-            for i, loss in enumerate(stage_losses):
-                if loss < threshold:
-                    convergence_epoch = i
-                    break
-            
-            convergence_times.append(convergence_epoch if convergence_epoch else len(stage_losses))
+            convergence_times.append(len(stage_losses))
         
         ax3.plot(stages, convergence_times, 'o-', linewidth=2, markersize=8, color='purple')
         ax3.set_xlabel('Étape')
         ax3.set_ylabel('Époque de convergence')
         ax3.set_title('Vitesse de Convergence par Étape')
         ax3.grid(True, alpha=0.3)
-        
-        # Efficacité (convergence / époques utilisées)
-        efficiency = [(1.0 if convergence_status[i] else 0.5) / max(epochs_used[i], 1)
-                      for i in range(len(stages))]
-        
-        ax4.bar(stage_names, efficiency, color=stage_colors, alpha=0.7)
-        ax4.set_ylabel('Efficacité (convergence/époque)')
-        ax4.set_title('Efficacité d\'Apprentissage par Étape')
         
         plt.tight_layout()
         plt.savefig(Path(CONFIG.OUTPUT_DIR) / "stage_comparison.png",
@@ -1336,17 +1294,15 @@ class ProgressiveVisualizer:
         # Résumé textuel des performances
         total_time = metrics['total_time_seconds']
         total_epochs = metrics['total_epochs_actual']
-        all_converged = metrics['all_stages_converged']
         final_loss = metrics['final_loss']
         
         summary_text = f"""
-🎯 RÉSUMÉ ENTRAÎNEMENT MODULAIRE NCA v7__
+🎯 RÉSUMÉ ENTRAÎNEMENT MODULAIRE NCA
 
 📊 STATISTIQUES GLOBALES:
    • Seed: {SEED}
    • Temps total: {total_time / 60:.1f} minutes ({total_time:.1f}s)
    • Époques totales: {total_epochs}
-   • Toutes étapes convergées: {'✅ OUI' if all_converged else '❌ NON'}
    • Perte finale: {final_loss:.6f}
 
 🏆 PERFORMANCE PAR ÉTAPE:"""
@@ -1357,7 +1313,7 @@ class ProgressiveVisualizer:
             
             summary_text += f"""
    • Étape {stage_nb} ({stage_name}):
-     - Époques: {stage_data['epochs_trained']} (convergée: {'✅' if stage_data['convergence_met'] else '❌'})
+     - Époques: {stage_data['epochs_trained']}
      - Perte finale: {stage_data['final_loss']:.6f}
      - Arrêt précoce: {'✅' if stage_data['early_stopped'] else '❌'}"""
         
@@ -1377,12 +1333,10 @@ class ProgressiveVisualizer:
         ax.set_xlim(0, 1)
         ax.set_ylim(0, 1)
         ax.axis('off')
-        ax.set_title('Résumé Performance Entraînement Modulaire NCA v7__',
-                     fontsize=14, fontweight='bold')
+        ax.set_title('Résumé Performance Entraînement Modulaire NCA', fontsize=14, fontweight='bold')
         
         plt.tight_layout()
-        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "performance_summary.png",
-                    dpi=150, bbox_inches='tight')
+        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "performance_summary.png", dpi=150, bbox_inches='tight')
         plt.close()
 
 
@@ -1434,16 +1388,13 @@ def main():
         print(f"📁 Résultats sauvegardés dans: {CONFIG.OUTPUT_DIR}")
         print(f"⏱️  Temps total: {global_metrics['total_time_formatted']}")
         print(f"📊 Époques: {global_metrics['total_epochs_actual']}/{global_metrics['total_epochs_planned']}")
-        print(f"🎯 Convergence: {'✅ TOUTES' if global_metrics['all_stages_converged'] else '❌ PARTIELLE'}")
         print(f"📉 Perte finale: {global_metrics['final_loss']:.6f}")
         
         # Détail par étape
         print(f"\n📋 DÉTAIL PAR ÉTAPE:")
-        for stage_nb in [1, 2, 3]:
-            stage_data = global_metrics['stage_metrics'][stage_nb]
-            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage_nb]
-            status = "✅ CONVERGÉE" if stage_data['convergence_met'] else "❌ NON CONVERGÉE"
-            print(f"   Étape {stage_nb} ({stage_name}): {status} - {stage_data['final_loss']:.6f}")
+        for stage in STAGE_MANAGER.get_stages():
+            stage_data = global_metrics['stage_metrics'][stage.get_stage_nb()]
+            print(f"   Étape {stage_nb} ({stage.get_display_name()}): {stage_data['final_loss']:.6f}")
         
         print(f"\n🎨 Fichiers de visualisation générés:")
         print(f"   • Animations par étape: stage_X/")

@@ -8,7 +8,7 @@ from torching import DEVICE
 
 class Stage1NoObstacle(BaseStage):
     NAME = 'no_obstacle'
-    DISPLAY_NAME = "Sans obstables"
+    DISPLAY_NAME = "Sans obstable"
     
     
     def generate_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:

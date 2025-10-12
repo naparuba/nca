@@ -1,3 +1,6 @@
+from typing import List
+
+from stages.base_stage import BaseStage
 from stages.stage_1_no_obstacle import Stage1NoObstacle
 from stages.stage_2_one_obstacle import Stage2OneObstacle
 from stages.stage_3_few_obstacles import Stage3FewObstacles
@@ -10,11 +13,19 @@ class StageManager:
                         Stage2OneObstacle(),
                         Stage3FewObstacles(),
                         ]
+        for stage in self._stages:
+            stage.set_stage_nb(self._stages.index(stage) + 1)
     
     
-    def get_stage(self, stage_nb: int):
-        if 1 <= stage_nb < len(self._stages)+1:
-            return self._stages[stage_nb-1]
+    def get_stages(self):
+        # type: () -> List[BaseStage]
+        return self._stages
+    
+    
+    def get_stage(self, stage_nb):
+        # type: (int) -> BaseStage
+        if 1 <= stage_nb < len(self._stages) + 1:
+            return self._stages[stage_nb - 1]
         raise IndexError(f'Stage number {stage_nb} is out of range.')
 
 
