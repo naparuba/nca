@@ -20,21 +20,16 @@ from torching import DEVICE
 # =============================================================================
 
 
-SEED = CONFIG.SEED
-VISUALIZATION_SEED = CONFIG.VISUALIZATION_SEED
-STAGNATION_THRESHOLD = CONFIG.STAGNATION_THRESHOLD
-STAGNATION_PATIENCE = CONFIG.STAGNATION_PATIENCE
-
 # Initialisation
-torch.manual_seed(SEED)
-np.random.seed(SEED)
+torch.manual_seed(CONFIG.SEED)
+np.random.seed(CONFIG.SEED)
 
 # Création du répertoire de sortie avec seed
 CONFIG.OUTPUT_DIR = f"outputs"
 os.makedirs(CONFIG.OUTPUT_DIR, exist_ok=True)
 
 print(f"Device: {DEVICE}")
-print(f"Seed: {SEED}")
+print(f"Seed: {CONFIG.SEED}")
 print(f"Répertoire de sortie: {CONFIG.OUTPUT_DIR}")
 
 from stage_manager import STAGE_MANAGER
@@ -46,15 +41,14 @@ def main():
     Orchestre tout le processus d'apprentissage par curriculum.
     """
     print(f"\n" + "=" * 80)
-    print(f"🚀 NEURAL CELLULAR AUTOMATON - APPRENTISSAGE MODULAIRE v7__")
+    print(f"🚀 NEURAL CELLULAR AUTOMATON - APPRENTISSAGE MODULAIRE")
     print(f"=" * 80)
     
     try:
         # Initialisation du modèle
         print("\n🔧 Initialisation du modèle...")
-        model = ImprovedNCA(
-                input_size=11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
-        ).to(DEVICE)
+        model = ImprovedNCA(input_size=11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
+                            ).to(DEVICE)
         
         print(f"📊 Nombre de paramètres dans le modèle: {sum(p.numel() for p in model.parameters()):,}")
         

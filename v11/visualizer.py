@@ -6,9 +6,10 @@ import torch
 from matplotlib import pyplot as plt
 
 from config import CONFIG
-from updater import OptimizedNCAUpdater
 from nca_model import ImprovedNCA
 from simulator import get_simulator
+from updater import OptimizedNCAUpdater
+
 
 class ProgressiveVisualizer:
     """
@@ -210,7 +211,7 @@ class ProgressiveVisualizer:
     
     def _plot_curriculum_progression(self, metrics: Dict[str, Any]):
         """Graphique de la progression globale du curriculum."""
-        fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(14, 15))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 15))
         
         # Historique des pertes avec codes couleur par étape
         losses = metrics['global_history']['losses']
@@ -255,117 +256,6 @@ class ProgressiveVisualizer:
         ax2.grid(True, alpha=0.3)
         ax2.set_yscale('log')
         
-        # Accélération du Learning Rate (dérivée seconde) pour détecter les changements d'accélération
-        for stage_nb in [1, 2, 3]:
-            stage_history = metrics['stage_histories'][stage_nb]
-            if stage_history['lr'] and len(stage_history['lr']) > 2:  # Besoin d'au moins 3 points pour dérivée seconde
-                # Calcul de la dérivée première (vitesse)
-                lr_values = stage_history['lr']
-                lr_velocity = []
-                
-                for i in range(1, len(lr_values)):
-                    velocity = lr_values[i] - lr_values[i - 1]
-                    lr_velocity.append(velocity)
-                
-                # Calcul de la dérivée seconde (accélération de l'accélération)
-                lr_acceleration = []
-                for i in range(1, len(lr_velocity)):
-                    acceleration = lr_velocity[i] - lr_velocity[i - 1]
-                    lr_acceleration.append(acceleration)
-                
-                # Époques correspondantes (on commence à l'époque 2 car on a besoin de 3 points pour la dérivée seconde)
-                stage_epochs_acceleration = [metrics['stage_start_epochs'].get(stage_nb, 0) + e
-                                             for e in stage_history['epochs'][2:]]
-                
-                if lr_acceleration:
-                    ax3.plot(stage_epochs_acceleration, lr_acceleration,
-                             color=stage_colors[stage_nb],
-                             label=f'Accélération LR Étape {stage_nb}',
-                             linewidth=2,
-                             marker='o', markersize=3, alpha=0.7)
-                    
-                    # Ligne de référence à zéro pour identifier les changements d'accélération
-                    ax3.axhline(y=0, color='black', linestyle='-', alpha=0.3, linewidth=1)
-                    
-                    # Zone négative (décélération) en rouge transparent
-                    negative_mask = [a < 0 for a in lr_acceleration]
-                    if any(negative_mask):
-                        ax3.fill_between(stage_epochs_acceleration, lr_acceleration, 0,
-                                         where=negative_mask,
-                                         alpha=0.2, color='red',
-                                         label='Zone de décélération' if stage_nb == 1 else "")
-                    
-                    # Zone positive (accélération croissante) en vert transparent
-                    positive_mask = [a > 0 for a in lr_acceleration]
-                    if any(positive_mask):
-                        ax3.fill_between(stage_epochs_acceleration, lr_acceleration, 0,
-                                         where=positive_mask,
-                                         alpha=0.2, color='green',
-                                         label='Zone d\'accélération' if stage_nb == 1 else "")
-                    
-                    # Détection et marquage des points d'inflexion
-                    inflection_points_epochs = []
-                    inflection_points_values = []
-                    
-                    for i in range(1, len(lr_acceleration)):
-                        # Point d'inflexion = changement de signe dans l'accélération
-                        prev_accel = lr_acceleration[i - 1]
-                        curr_accel = lr_acceleration[i]
-                        
-                        # Vérifier si on traverse zéro (changement de signe)
-                        if (prev_accel > 0 and curr_accel < 0) or (prev_accel < 0 and curr_accel > 0):
-                            # Filtre très léger pour éviter seulement le bruit extrême
-                            if abs(prev_accel) > 1e-12 or abs(curr_accel) > 1e-12:
-                                inflection_epoch = stage_epochs_acceleration[i]
-                                inflection_value = curr_accel
-                                inflection_points_epochs.append(inflection_epoch)
-                                inflection_points_values.append(inflection_value)
-                    
-                    # Marquer les points d'inflexion sur le graphique
-                    if inflection_points_epochs:
-                        ax3.scatter(inflection_points_epochs, inflection_points_values,
-                                    color=stage_colors[stage_nb],
-                                    s=80, marker='X',
-                                    edgecolors='black', linewidth=2,
-                                    label=f'Points d\'inflexion Étape {stage_nb}' if stage_nb == 1 else "",
-                                    zorder=5, alpha=0.9)
-                        
-                        # Annotations pour les points d'inflexion les plus significatifs
-                        for i, (epoch, value) in enumerate(zip(inflection_points_epochs, inflection_points_values)):
-                            if i < 3:  # Limite à 3 annotations par étape pour éviter l'encombrement
-                                ax3.annotate(f'Inflexion\nÉ{epoch}',
-                                             xy=(epoch, value),
-                                             xytext=(10, 20 if value > 0 else -30),
-                                             textcoords='offset points',
-                                             fontsize=8,
-                                             color=stage_colors[stage_nb],
-                                             bbox=dict(boxstyle='round,pad=0.3',
-                                                       facecolor='white',
-                                                       edgecolor=stage_colors[stage_nb],
-                                                       alpha=0.8),
-                                             arrowprops=dict(arrowstyle='->',
-                                                             connectionstyle='arc3,rad=0.2',
-                                                             color=stage_colors[stage_nb],
-                                                             alpha=0.7))
-        
-        ax3.set_xlabel('Époque')
-        ax3.set_ylabel('Accélération LR (Δ²LR par époque²)')
-        ax3.set_title('Accélération du Learning Rate - Points d\'Inflexion et Changements d\'Accélération')
-        ax3.legend()
-        ax3.grid(True, alpha=0.3)
-        
-        # Annotation explicative pour interpréter le graphique d'accélération avec points d'inflexion
-        ax3.text(0.02, 0.98,
-                 'Valeurs négatives = LR décélère (ralentissement qui s\'accélère)\n'
-                 'Valeurs positives = LR accélère (accélération qui s\'intensifie)\n'
-                 'Valeurs proches de 0 = Vitesse LR constante (accélération stable)\n'
-                 'X = Points d\'inflexion (changements de dynamique du LR)\n'
-                 'Les points d\'inflexion indiquent des changements de politique d\'optimisation',
-                 transform=ax3.transAxes,
-                 fontsize=9,
-                 verticalalignment='top',
-                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
         plt.tight_layout()
         plt.savefig(Path(CONFIG.OUTPUT_DIR) / "curriculum_progression.png",
                     dpi=150, bbox_inches='tight')
@@ -385,12 +275,11 @@ class ProgressiveVisualizer:
         
         # Époques utilisées par étape
         epochs_used = [metrics['stage_metrics'][s]['epochs_trained'] for s in stages]
-        epochs_planned = [CONFIG.STAGE_1_EPOCHS, CONFIG.STAGE_2_EPOCHS, CONFIG.STAGE_3_EPOCHS]
+
         
         x = np.arange(len(stages))
         width = 0.35
         
-        ax2.bar(x - width / 2, epochs_planned, width, label='Prévues', alpha=0.7, color='lightblue')
         ax2.bar(x + width / 2, epochs_used, width, label='Utilisées', alpha=0.7, color='darkblue')
         
         ax2.set_xlabel('Étape')
@@ -445,8 +334,7 @@ class ProgressiveVisualizer:
             summary_text += f"""
    • Étape {stage_nb} ({stage_name}):
      - Époques: {stage_data['epochs_trained']}
-     - Perte finale: {stage_data['final_loss']:.6f}
-     - Arrêt précoce: {'✅' if stage_data['early_stopped'] else '❌'}"""
+     - Perte finale: {stage_data['final_loss']:.6f}"""
         
         summary_text += f"""
 

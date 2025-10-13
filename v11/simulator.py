@@ -11,7 +11,7 @@ from obstacles import ProgressiveObstacleManager
 # =============================================================================
 # Simulateur de diffusion
 # =============================================================================
-class DiffusionSimulator:
+class HeatDiffusionSimulator:
     """
     Simulateur de diffusion de chaleur adapté pour l'apprentissage modulaire.
     Utilise le gestionnaire d'obstacles progressifs.
@@ -19,7 +19,7 @@ class DiffusionSimulator:
     
     
     def __init__(self):
-        self.kernel = torch.ones((1, 1, 3, 3), device=DEVICE) / 9.0
+        self.kernel = torch.ones((1, 1, 3, 3), device=DEVICE) / 9.0  # Average 3x3
         self.obstacle_manager = ProgressiveObstacleManager()
     
     
@@ -78,8 +78,8 @@ class DiffusionSimulator:
 
 simulator = None
 
-def get_simulator() -> DiffusionSimulator:
+def get_simulator() -> HeatDiffusionSimulator:
     global simulator
     if simulator is None:
-        simulator = DiffusionSimulator()
+        simulator = HeatDiffusionSimulator()
     return simulator
