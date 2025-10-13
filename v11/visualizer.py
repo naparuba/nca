@@ -6,8 +6,8 @@ import torch
 from matplotlib import pyplot as plt
 
 from config import CONFIG
-from train import ImprovedNCA, simulator, OptimizedNCAUpdater
-
+from train import ImprovedNCA, OptimizedNCAUpdater
+from simulator import get_simulator
 
 class ProgressiveVisualizer:
     """
@@ -35,7 +35,7 @@ class ProgressiveVisualizer:
         # Génération de la séquence de test avec seed fixe
         torch.manual_seed(CONFIG.VISUALIZATION_SEED)
         np.random.seed(CONFIG.VISUALIZATION_SEED)
-        
+        simulator = get_simulator()
         target_seq, source_mask, obstacle_mask = simulator.generate_stage_sequence(
                 stage_nb=stage_nb,
                 n_steps=CONFIG.POSTVIS_STEPS,
