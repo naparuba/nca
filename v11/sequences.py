@@ -22,12 +22,12 @@ class OptimizedSequenceCache:
             return  # Déjà initialisé
         
         cache_size = self.cache_sizes.get(stage_nb, 200)
-        print(f"🎯 Génération de {cache_size} séquences pour l'étape {stage_nb}...")
+        print(f"🎯 Génération de {cache_size} séquences pour l'étape {stage_nb}...", end='', flush=True)
         
         sequences = []
         for i in range(cache_size):
             if i % 50 == 0:
-                print(f"   Étape {stage_nb}: {i}/{cache_size}")
+                print(f"\r   Étape {stage_nb}: {i}/{cache_size}                                 ", end='', flush=True)
             
             target_seq, source_mask, obstacle_mask = self.simulator.generate_stage_sequence(
                     stage_nb=stage_nb,
@@ -44,7 +44,7 @@ class OptimizedSequenceCache:
         
         self.stage_caches[stage_nb] = sequences
         self.current_indices[stage_nb] = 0
-        print(f"✅ Cache étape {stage_nb} créé ({cache_size} séquences)")
+        print(f"\r✅ Cache étape {stage_nb} créé ({cache_size} séquences)")
     
     
     def get_stage_batch(self, stage_nb: int, batch_size: int):

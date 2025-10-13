@@ -6,7 +6,8 @@ import torch
 from matplotlib import pyplot as plt
 
 from config import CONFIG
-from train import ImprovedNCA, OptimizedNCAUpdater
+from updater import OptimizedNCAUpdater
+from nca_model import ImprovedNCA
 from simulator import get_simulator
 
 class ProgressiveVisualizer:
