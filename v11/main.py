@@ -1,6 +1,7 @@
 import os
 # HACK for imports
 import sys
+import time
 
 import numpy as np
 import torch
@@ -32,8 +33,6 @@ print(f"Device: {DEVICE}")
 print(f"Seed: {CONFIG.SEED}")
 print(f"Répertoire de sortie: {CONFIG.OUTPUT_DIR}")
 
-from stage_manager import STAGE_MANAGER
-
 
 def main():
     """
@@ -58,7 +57,9 @@ def main():
         
         # Lancement de l'entraînement complet
         print("🚀 Lancement de l'entraînement modulaire...")
-        global_metrics = trainer.train_full_curriculum()
+        before = time.time()
+        trainer.train_full_curriculum()
+        after = time.time()
         
         # Génération des visualisations progressives
         print("\n🎨 Génération des visualisations...")
@@ -70,22 +71,15 @@ def main():
             visualizer.visualize_stage_results(model, stage_nb)
         
         # Résumé visuel complet du curriculum
-        visualizer.create_curriculum_summary(global_metrics)
+        visualizer.create_curriculum_summary()
         
         # Rapport final
         print(f"\n" + "=" * 80)
         print(f"🎉 ENTRAÎNEMENT MODULAIRE TERMINÉ AVEC SUCCÈS!")
         print(f"=" * 80)
         print(f"📁 Résultats sauvegardés dans: {CONFIG.OUTPUT_DIR}")
-        print(f"⏱️  Temps total: {global_metrics['total_time_formatted']}")
-        print(f"📊 Époques: {global_metrics['total_epochs_actual']}/{global_metrics['total_epochs_planned']}")
-        print(f"📉 Perte finale: {global_metrics['final_loss']:.6f}")
-        
-        # Détail par étape
-        print(f"\n📋 DÉTAIL PAR ÉTAPE:")
-        for stage in STAGE_MANAGER.get_stages():
-            stage_data = global_metrics['stage_metrics'][stage.get_stage_nb()]
-            print(f"   Étape {stage_nb} ({stage.get_display_name()}): {stage_data['final_loss']:.6f}")
+        print(f"⏱️  Temps total: {f"{(after - before) / 60:.1f} min"}")
+        print(f"📊 Époques: {CONFIG.TOTAL_EPOCHS}")
         
         print(f"\n🎨 Fichiers de visualisation générés:")
         print(f"   • Animations par étape: stage_X/")
@@ -93,27 +87,20 @@ def main():
         print(f"   • Comparaison étapes: stage_comparison.png")
         print(f"   • Résumé performance: performance_summary.png")
         print(f"   • Métriques complètes: complete_metrics.json")
-        
-        return global_metrics
     
     except KeyboardInterrupt:
         print(f"\n⚠️  Entraînement interrompu par l'utilisateur")
-        return None
+        print(f"\n❌ Programme terminé avec erreurs")
+        sys.exit(1)
     except Exception as e:
         print(f"\n❌ ERREUR lors de l'entraînement:")
         print(f"   {type(e).__name__}: {str(e)}")
         import traceback
         traceback.print_exc()
-        return None
+        sys.exit(1)
 
 
 if __name__ == "__main__":
     # Exécution du programme principal
     results = main()
-    
-    if results is not None:
-        print(f"\n🎯 Programme terminé avec succès!")
-        print(f"📊 Résultats disponibles dans la variable 'results'")
-    else:
-        print(f"\n❌ Programme terminé avec erreurs")
-        exit(1)
+    print(f"\n🎯 Programme terminé avec succès!")

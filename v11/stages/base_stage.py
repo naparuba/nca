@@ -1,7 +1,7 @@
 import json
 from abc import ABC
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict
 
 import torch
 from config import CONFIG
@@ -11,9 +11,15 @@ class BaseStage(ABC):
     NAME = 'UNSET'
     DISPLAY_NAME = 'Étape non définie'
     
+    COLOR = 'black'
     
     def __init__(self):
         self._stage_nb = -1  # Numéro de l'étape, à définir dans les sous-classes
+        
+        # Metrics
+        self._metrics_epochs_trained = 0
+        self._metrics_loss_history = []
+        self._metrics_stage_lrs = []
     
     
     def get_name(self):
@@ -23,9 +29,17 @@ class BaseStage(ABC):
     def get_display_name(self):
         return self.DISPLAY_NAME
     
+    def get_color(self):
+        return self.COLOR
     
     def set_stage_nb(self, stage_nb: int):
         self._stage_nb = stage_nb
+    
+    
+    def set_metrics(self, epochs_trained: int, loss_history: list, stage_lrs: list):
+        self._metrics_epochs_trained = epochs_trained
+        self._metrics_loss_history = loss_history
+        self._metrics_stage_lrs = stage_lrs
     
     
     def get_stage_nb(self):
@@ -43,10 +57,30 @@ class BaseStage(ABC):
         return stage_dir
     
     
-    def save_stage_checkpoint(self, metrics: Dict[str, Any], model_state_dict: Dict, optimizer_state_dict: Dict):
+    def get_metrics(self):
+        """Retourne les métriques de l'étape."""
+        
+        return {
+            'stage_nb':       self.get_stage_nb(),
+            'epochs_trained': self._metrics_epochs_trained,
+            'loss_history':   self._metrics_loss_history,
+        }
+    
+    def get_loss_history(self):
+        return self._metrics_loss_history
+    
+    def get_metrics_epochs_trained(self):
+        return self._metrics_epochs_trained
+    
+    def get_metrics_lrs(self):
+        return self._metrics_stage_lrs
+    
+    def save_stage_checkpoint(self, model_state_dict: Dict, optimizer_state_dict: Dict):
         """Sauvegarde le checkpoint d'une étape."""
         
         stage_dir = self._get_stage_dir()
+        
+        metrics = self.get_metrics()
         
         # Sauvegarde du modèle
         model_path = stage_dir / "model_checkpoint.pth"

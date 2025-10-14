@@ -12,6 +12,7 @@ from config import CONFIG
 class Stage3FewObstacles(BaseStage):
     NAME = 'few_obstacles'
     DISPLAY_NAME = "Obstables multiples"
+    COLOR = 'red'
     
     MIN_OBSTACLE_SIZE = 2
     MAX_OBSTACLE_SIZE = 4

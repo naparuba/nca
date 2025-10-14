@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from config import CONFIG
 from nca_model import ImprovedNCA
 from simulator import get_simulator
+from stage_manager import STAGE_MANAGER
 from updater import OptimizedNCAUpdater
 
 
@@ -92,14 +93,6 @@ class ProgressiveVisualizer:
                 f"Étape {stage_nb} - Comparaison Cible vs NCA"
         )
         
-        # Animation NCA seule
-        self._save_single_gif(
-                vis_data['nca_sequence'],
-                vis_data['obstacle_mask'],
-                stage_dir / f"animation_nca_étape_{stage_nb}.gif",
-                f"Étape {stage_nb} - Prédiction NCA"
-        )
-        
         print(f"✅ Animations étape {stage_nb} sauvegardées dans {stage_dir}")
     
     
@@ -170,64 +163,31 @@ class ProgressiveVisualizer:
         plt.close()
     
     
-    def _save_single_gif(self, sequence: List[np.ndarray], obstacle_mask: np.ndarray,
-                         filepath: Path, title: str):
-        """Sauvegarde un GIF d'une séquence unique."""
-        import matplotlib.animation as animation
-        
-        fig, ax = plt.subplots(figsize=(8, 8))
-        
-        
-        def animate(frame):
-            ax.clear()
-            im = ax.imshow(sequence[frame], cmap='hot', vmin=0, vmax=1)
-            ax.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
-            ax.set_title(f'{title} - t={frame}')
-            ax.set_xticks([])
-            ax.set_yticks([])
-            return [im]
-        
-        
-        ani = animation.FuncAnimation(fig, animate, frames=len(sequence), interval=200, blit=False)
-        ani.save(filepath, writer='pillow', fps=5)
-        plt.close()
-    
-    
-    def create_curriculum_summary(self, global_metrics: Dict[str, Any]):
+    def create_curriculum_summary(self):
         """Crée un résumé visuel complet du curriculum d'apprentissage."""
         print("\n🎨 Génération du résumé visuel du curriculum...")
         
         # Graphique de progression globale
-        self._plot_curriculum_progression(global_metrics)
+        self._plot_curriculum_progression()
         
         # Comparaison inter-étapes
-        self._plot_stage_comparison(global_metrics)
-        
-        # Métriques de performance
-        self._plot_performance_metrics(global_metrics)
+        self._plot_stage_comparison()
         
         print("✅ Résumé visuel complet généré")
     
     
-    def _plot_curriculum_progression(self, metrics: Dict[str, Any]):
+    def _plot_curriculum_progression(self):
         """Graphique de la progression globale du curriculum."""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 15))
         
-        # Historique des pertes avec codes couleur par étape
-        losses = metrics['global_history']['losses']
-        stages = metrics['global_history']['stages']
-        epochs = metrics['global_history']['epochs']
-        
-        stage_colors = {1: 'green', 2: 'orange', 3: 'red'}
-        
-        for stage_nb in [1, 2, 3]:
-            stage_indices = [i for i, s in enumerate(stages) if s == stage_nb]
-            stage_losses = [losses[i] for i in stage_indices]
-            stage_epochs = [epochs[i] for i in stage_indices]
+        for stage in STAGE_MANAGER.get_stages():
+            stage_nb = stage.get_stage_nb()
+            loss_history = stage.get_loss_history()
+            stage_epochs = list(range((stage_nb - 1) * CONFIG.NB_EPOCHS_BY_STAGE, stage_nb * CONFIG.NB_EPOCHS_BY_STAGE))
             
-            if stage_losses:
-                ax1.plot(stage_epochs, stage_losses,
-                         color=stage_colors[stage_nb],
+            if loss_history:
+                ax1.plot(stage_epochs, loss_history,
+                         color=stage.get_color(),
                          label=f'Étape {stage_nb}',
                          linewidth=2)
         
@@ -239,13 +199,14 @@ class ProgressiveVisualizer:
         ax1.set_yscale('log')
         
         # Learning rate par étape
-        for stage_nb in [1, 2, 3]:
-            stage_history = metrics['stage_histories'][stage_nb]
-            if stage_history['lr']:
-                stage_epochs_local = [metrics['stage_start_epochs'].get(stage_nb, 0) + e
-                                      for e in stage_history['epochs']]
-                ax2.plot(stage_epochs_local, stage_history['lr'],
-                         color=stage_colors[stage_nb],
+        for stage in STAGE_MANAGER.get_stages():
+            stage_nb = stage.get_stage_nb()
+            
+            lrs = stage.get_metrics_lrs()
+            if lrs:
+                stage_epochs = list(range((stage_nb - 1) * CONFIG.NB_EPOCHS_BY_STAGE, stage_nb * CONFIG.NB_EPOCHS_BY_STAGE))
+                ax2.plot(stage_epochs, lrs,
+                         color=stage.get_color(),
                          label=f'LR Étape {stage_nb}',
                          linewidth=2)
         
@@ -262,9 +223,9 @@ class ProgressiveVisualizer:
         plt.close()
     
     
-    def _plot_stage_comparison(self, metrics: Dict[str, Any]):
+    def _plot_stage_comparison(self):
         """Graphique de comparaison entre étapes."""
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 12))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 12))
         
         stages = [1, 2, 3]
         stage_names = ["Sans obstacles", "Un obstacle", "Obstacles multiples"]
@@ -274,8 +235,7 @@ class ProgressiveVisualizer:
         ax1.set_yscale('log')
         
         # Époques utilisées par étape
-        epochs_used = [metrics['stage_metrics'][s]['epochs_trained'] for s in stages]
-
+        epochs_used = CONFIG.NB_EPOCHS_BY_STAGE
         
         x = np.arange(len(stages))
         width = 0.35
@@ -289,71 +249,7 @@ class ProgressiveVisualizer:
         ax2.set_xticklabels(stage_names, rotation=15)
         ax2.legend()
         
-        # Temps de convergence
-        convergence_times = []
-        for stage_nb in stages:
-            stage_losses = metrics['stage_metrics'][stage_nb]['loss_history']
-            convergence_times.append(len(stage_losses))
-        
-        ax3.plot(stages, convergence_times, 'o-', linewidth=2, markersize=8, color='purple')
-        ax3.set_xlabel('Étape')
-        ax3.set_ylabel('Époque de convergence')
-        ax3.set_title('Vitesse de Convergence par Étape')
-        ax3.grid(True, alpha=0.3)
-        
         plt.tight_layout()
         plt.savefig(Path(CONFIG.OUTPUT_DIR) / "stage_comparison.png",
                     dpi=150, bbox_inches='tight')
-        plt.close()
-    
-    
-    def _plot_performance_metrics(self, metrics: Dict[str, Any]):
-        """Graphique des métriques de performance globales."""
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        # Résumé textuel des performances
-        total_time = metrics['total_time_seconds']
-        total_epochs = metrics['total_epochs_actual']
-        final_loss = metrics['final_loss']
-        
-        summary_text = f"""
-🎯 RÉSUMÉ ENTRAÎNEMENT MODULAIRE NCA
-
-📊 STATISTIQUES GLOBALES:
-   • Seed: {CONFIG.SEED}
-   • Temps total: {total_time / 60:.1f} minutes ({total_time:.1f}s)
-   • Époques totales: {total_epochs}
-   • Perte finale: {final_loss:.6f}
-
-🏆 PERFORMANCE PAR ÉTAPE:"""
-        
-        for stage_nb in [1, 2, 3]:
-            stage_data = metrics['stage_metrics'][stage_nb]
-            stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage_nb]
-            
-            summary_text += f"""
-   • Étape {stage_nb} ({stage_name}):
-     - Époques: {stage_data['epochs_trained']}
-     - Perte finale: {stage_data['final_loss']:.6f}"""
-        
-        summary_text += f"""
-
-📈 ARCHITECTURE:
-   • Taille grille: {CONFIG.GRID_SIZE}x{CONFIG.GRID_SIZE}
-   • Couches cachées: {CONFIG.HIDDEN_SIZE} neurones, {CONFIG.N_LAYERS} couches
-   • Pas temporels NCA: {CONFIG.NCA_STEPS}
-   • Taille batch: {CONFIG.BATCH_SIZE}
-        """
-        
-        ax.text(0.05, 0.95, summary_text, transform=ax.transAxes,
-                fontsize=10, verticalalignment='top', fontfamily='monospace',
-                bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
-        
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.axis('off')
-        ax.set_title('Résumé Performance Entraînement Modulaire NCA', fontsize=14, fontweight='bold')
-        
-        plt.tight_layout()
-        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "performance_summary.png", dpi=150, bbox_inches='tight')
         plt.close()

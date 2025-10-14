@@ -1,7 +1,6 @@
-import json
 import time
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
 
 import numpy as np
 import torch
@@ -35,18 +34,15 @@ class ModularTrainer:
         self._optimizer = optim.AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
         self._loss_fn = nn.MSELoss()
         
-        # Curriculum et métriques
-        
+        # Curriculum
         self._curriculum = CurriculumScheduler()
         
         # Cache optimisé par étape
         self._sequence_cache = OptimizedSequenceCache()
         
         # État d'entraînement
-        self._stage_histories = {stage_nb: {'losses': [], 'epochs': [], 'lr': []} for stage_nb in [1, 2, 3]}
-        self._global_history = {'losses': [], 'stages': [], 'epochs': []}
-        self._stage_start_epochs = {}
-        self._total_epochs_trained = 0
+        # self._stage_start_epochs = {}
+        # self._total_epochs_trained = 0
     
     
     def _train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor,
@@ -91,12 +87,12 @@ class ModularTrainer:
         return avg_loss.item()
     
     
-    def _train_stage(self, stage: BaseStage, max_epochs: int) -> Dict[str, Any]:
+    def _train_stage(self, stage: BaseStage, max_epochs: int) -> None:
         """
         Entraînement complet d'une étape spécifique.
 
         Args:
-            stage_nb: Numéro d'étape (1, 2, ou 3)
+            stage: Serieux?
             max_epochs: Nombre maximum d'époques pour cette étape
 
         Returns:
@@ -108,13 +104,14 @@ class ModularTrainer:
         print(f"📋 {stage.get_display_name()}")
         print(f"⏱️  Maximum {max_epochs} époques")
         
-        self._stage_start_epochs[stage_nb] = self._total_epochs_trained
+        # self._stage_start_epochs[stage_nb] = self._total_epochs_trained
         
         # Initialisation du cache pour cette étape
         self._sequence_cache.initialize_stage_cache(stage_nb)
         
         # Métriques de l'étape
         stage_losses = []
+        stage_lrs = []
         epoch_in_stage = 0
         
         # Boucle d'entraînement de l'étape
@@ -143,17 +140,9 @@ class ModularTrainer:
             avg_epoch_loss = np.mean(epoch_losses)
             stage_losses.append(avg_epoch_loss)
             current_lr = self._optimizer.param_groups[0]['lr']
+            stage_lrs.append(current_lr)
             
-            # Historiques
-            self._stage_histories[stage_nb]['losses'].append(avg_epoch_loss)
-            self._stage_histories[stage_nb]['epochs'].append(epoch_in_stage)
-            self._stage_histories[stage_nb]['lr'].append(current_lr)
-            
-            self._global_history['losses'].append(avg_epoch_loss)
-            self._global_history['stages'].append(stage_nb)
-            self._global_history['epochs'].append(self._total_epochs_trained)
-            
-            self._total_epochs_trained += 1
+            # self._total_epochs_trained += 1
             
             # Affichage périodique
             if epoch_in_stage % 10 == 0 or epoch_in_stage == max_epochs - 1:
@@ -161,32 +150,23 @@ class ModularTrainer:
                       f"Loss: {avg_epoch_loss:.6f} | "
                       f"LR: {current_lr:.2e}")
         
-        # Résumé de l'étape
-        final_loss = stage_losses[-1] if stage_losses else float('inf')
-        
-        stage_metrics = {
-            'stage_nb':       stage_nb,
-            'epochs_trained': epoch_in_stage + 1,
-            'final_loss':     final_loss,
-            'loss_history':   stage_losses
-        }
+        stage.set_metrics(epoch_in_stage + 1, stage_losses, stage_lrs)
         
         print(f"✅ === ÉTAPE {stage_nb} - TERMINÉE ===")
         print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
-        print(f"📉 Perte finale: {final_loss:.6f}")
         
         # Sauvegarde du checkpoint d'étape
         stage = STAGE_MANAGER.get_stage(stage_nb)
-        stage.save_stage_checkpoint(stage_metrics, self._model.state_dict(), self._optimizer.state_dict())
+        stage.save_stage_checkpoint(self._model.state_dict(), self._optimizer.state_dict())
         
         # Libération du cache de l'étape précédente pour économiser la mémoire
         if stage_nb > 1:
             self._sequence_cache.clear_stage_cache(stage_nb - 1)
         
-        return stage_metrics
+        return
     
     
-    def train_full_curriculum(self) -> Dict[str, Any]:
+    def train_full_curriculum(self) -> None:
         """
         Entraînement complet du curriculum en 3 étapes.
 
@@ -201,68 +181,32 @@ class ModularTrainer:
         start_time = time.time()
         self._model.train()
         
-        # Entraînement séquentiel des 3 étapes
-        all_stage_metrics = {}
-        
-        metrics = {}
+        # Entraînement séquentiel
         for stage in STAGE_MANAGER.get_stages():
-            stage_nb = stage.get_stage_nb()
-            metrics = self._train_stage(stage, CONFIG.NB_EPOCHS_BY_STAGE)
-            all_stage_metrics[stage_nb] = metrics
-        
-        # ÉTAPE 1: Sans obstacles
-        # stage_1_metrics = self._train_stage(1, CONFIG.STAGE_1_EPOCHS)
-        # all_stage_metrics[1] = stage_1_metrics
-        #
-        # # ÉTAPE 2: Un obstacle
-        # stage_2_metrics = self._train_stage(2, CONFIG.STAGE_2_EPOCHS)
-        # all_stage_metrics[2] = stage_2_metrics
-        #
-        # # ÉTAPE 3: Obstacles multiples
-        # stage_3_metrics = self._train_stage(3, CONFIG.STAGE_3_EPOCHS)
-        # all_stage_metrics[3] = stage_3_metrics
+            self._train_stage(stage, CONFIG.NB_EPOCHS_BY_STAGE)
         
         # Métriques globales
         total_time = time.time() - start_time
-        total_epochs_actual = sum(metrics['epochs_trained'] for metrics in all_stage_metrics.values())
-        
-        global_metrics = {
-            'total_epochs_planned': CONFIG.TOTAL_EPOCHS,
-            'total_epochs_actual':  total_epochs_actual,
-            'total_time_seconds':   total_time,
-            'total_time_formatted': f"{total_time / 60:.1f} min",
-            'stage_metrics':        all_stage_metrics,
-            'final_loss':           metrics['final_loss'],
-            'global_history':       self._global_history,
-            'stage_histories':      self._stage_histories,
-            'stage_start_epochs':   self._stage_start_epochs
-        }
         
         print(f"\n🎉 === ENTRAÎNEMENT MODULAIRE TERMINÉ ===")
         print(f"⏱️  Temps total: {total_time / 60:.1f} minutes")
-        print(f"📊 Époques totales: {total_epochs_actual}/{CONFIG.TOTAL_EPOCHS}")
-        print(f"📉 Perte finale: {global_metrics['final_loss']:.6f}")
+        print(f"📊 Époques totales: {CONFIG.TOTAL_EPOCHS}")
         
         # Sauvegarde du modèle final et des métriques
-        self._save_final_model(global_metrics)
+        self._save_final_model()
         
-        return global_metrics
+        return
     
     
-    def _save_final_model(self, global_metrics: Dict[str, Any]):
+    def _save_final_model(self):
         """Sauvegarde le modèle final et toutes les métriques."""
         # Modèle final
         final_model_path = Path(CONFIG.OUTPUT_DIR) / "final_model.pth"
         torch.save({
             'model_state_dict':     self._model.state_dict(),
             'optimizer_state_dict': self._optimizer.state_dict(),
-            'global_metrics':       global_metrics,
+            # 'global_metrics':       global_metrics_,
             'config':               CONFIG.__dict__
         }, final_model_path)
-        
-        # Métriques complètes
-        full_metrics_path = Path(CONFIG.OUTPUT_DIR) / "complete_metrics.json"
-        with open(full_metrics_path, 'w') as f:
-            json.dump(global_metrics, f, indent=2, default=str)
         
         print(f"💾 Modèle final et métriques sauvegardés: {CONFIG.OUTPUT_DIR}")
