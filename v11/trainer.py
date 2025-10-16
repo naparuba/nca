@@ -6,37 +6,31 @@ import numpy as np
 import torch
 from torch import optim as optim, nn as nn
 
-from config import CONFIG
-from nca_model import ImprovedNCA
+from config import CONFIG, DEVICE
+from nca_model import NCA
 from sequences import OptimizedSequenceCache
 from stage_manager import STAGE_MANAGER
-from torching import DEVICE
-from updater import OptimizedNCAUpdater
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
 
 
-class ModularTrainer:
+class Trainer:
     """
     Système d'entraînement modulaire progressif.
     Gère l'apprentissage par étapes avec transitions automatiques.
     """
     
     
-    def __init__(self, model: ImprovedNCA):
+    def __init__(self, model: NCA):
         self._model = model
         
         # Choix de l'updater optimisé
         print("🚀 Utilisation de l'updater optimisé vectorisé")
-        self._updater = OptimizedNCAUpdater(model)
         
         # Optimiseur et planificateur
         self._optimizer = optim.AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
         self._loss_fn = nn.MSELoss()
-        
-        # Curriculum
-        # self._curriculum = CurriculumScheduler()
         
         # Cache optimisé par étape
         self._sequence_cache = OptimizedSequenceCache()
@@ -67,7 +61,7 @@ class ModularTrainer:
         # Déroulement temporel
         for t_step in range(CONFIG.NCA_STEPS):
             target = target_sequence[t_step + 1]
-            grid_pred = self._updater.step(grid_pred, source_mask, obstacle_mask)
+            grid_pred = self._model.step(grid_pred, source_mask, obstacle_mask)
             
             # Perte pondérée selon l'étape
             step_loss = self._loss_fn(grid_pred, target)

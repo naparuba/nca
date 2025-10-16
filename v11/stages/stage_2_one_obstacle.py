@@ -1,9 +1,9 @@
 from typing import Tuple
 
 import torch
-from config import CONFIG
+from config import CONFIG, DEVICE
 from stages.base_stage import BaseStage
-from torching import DEVICE
+
 
 
 class Stage2OneObstacle(BaseStage):

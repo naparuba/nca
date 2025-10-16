@@ -1,3 +1,8 @@
+import torch
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+
 class ModularConfig:
     """
     Configuration étendue pour l'apprentissage modulaire progressif.

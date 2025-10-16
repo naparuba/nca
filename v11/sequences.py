@@ -16,7 +16,6 @@ class OptimizedSequenceCache:
     
     
     def __init__(self):
-        self._simulator = get_simulator()
         self._stage_caches = {}  # Cache par étape
         self._current_indices = {}
     
@@ -37,7 +36,7 @@ class OptimizedSequenceCache:
             if i % 50 == 0:
                 print(f"\r   Étape {stage_nb}: {i}/{cache_size}                                 ", end='', flush=True)
             
-            target_seq, source_mask, obstacle_mask = self._simulator.generate_stage_sequence(
+            target_seq, source_mask, obstacle_mask = get_simulator().generate_stage_sequence(
                     stage=stage,
                     n_steps=CONFIG.NCA_STEPS,
                     size=CONFIG.GRID_SIZE

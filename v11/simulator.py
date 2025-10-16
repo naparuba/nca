@@ -3,8 +3,7 @@ from typing import Tuple, List, TYPE_CHECKING
 import torch
 from torch.nn import functional as F
 
-from config import CONFIG
-from torching import DEVICE
+from config import CONFIG, DEVICE
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
@@ -47,7 +46,7 @@ class HeatDiffusionSimulator:
             n_steps: Nombre d'étapes de simulation
             size: Taille de la grille
             
-        Returns:
+        Returns :
             (séquence, masque_source, masque_obstacles)
         """
         # Position aléatoire de la source

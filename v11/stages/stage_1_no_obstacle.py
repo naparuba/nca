@@ -1,8 +1,8 @@
 from typing import Tuple
 
 import torch
+from config import DEVICE
 from stages.base_stage import BaseStage
-from torching import DEVICE
 
 
 class Stage1NoObstacle(BaseStage):

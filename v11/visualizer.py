@@ -7,10 +7,9 @@ import torch
 from matplotlib import pyplot as plt
 
 from config import CONFIG
-from nca_model import ImprovedNCA
+from nca_model import NCA
 from simulator import get_simulator
 from stage_manager import STAGE_MANAGER
-from updater import OptimizedNCAUpdater
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
@@ -24,7 +23,7 @@ class ProgressiveVisualizer:
     
     
     def visualize_stage_results(self, model, stage):
-        # type: (ImprovedNCA, BaseStage) -> None
+        # type: (NCA, BaseStage) -> None
         """
         Visualise les résultats d'une étape spécifique.
 
@@ -42,8 +41,8 @@ class ProgressiveVisualizer:
         # Génération de la séquence de test avec seed fixe
         torch.manual_seed(CONFIG.VISUALIZATION_SEED)
         np.random.seed(CONFIG.VISUALIZATION_SEED)
-        simulator = get_simulator()
-        target_seq, source_mask, obstacle_mask = simulator.generate_stage_sequence(
+        
+        target_seq, source_mask, obstacle_mask = get_simulator().generate_stage_sequence(
                 stage=stage,
                 n_steps=CONFIG.POSTVIS_STEPS,
                 size=CONFIG.GRID_SIZE
@@ -51,7 +50,6 @@ class ProgressiveVisualizer:
         
         # Prédiction du modèle
         model.eval()
-        updater = OptimizedNCAUpdater(model)
         
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
         nca_sequence = []
@@ -61,7 +59,7 @@ class ProgressiveVisualizer:
         
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
             for _ in range(CONFIG.POSTVIS_STEPS):
-                grid_pred = updater.step(grid_pred, source_mask, obstacle_mask)
+                grid_pred = model.step(grid_pred, source_mask, obstacle_mask)
                 nca_sequence.append(grid_pred.clone())
         
         # Création des visualisations avec .detach() pour sécurité
@@ -100,7 +98,8 @@ class ProgressiveVisualizer:
         print(f"✅ Animations étape {stage_nb} sauvegardées dans {stage_dir}")
     
     
-    def _create_stage_convergence_plot(self, vis_data):
+    @staticmethod
+    def _create_stage_convergence_plot(vis_data):
         # type: (Dict[str, Any]) -> None
         """Crée le graphique de convergence pour une étape."""
         stage_nb = vis_data['stage_nb']
@@ -133,7 +132,8 @@ class ProgressiveVisualizer:
         print(f"✅ Graphique de convergence étape {stage_nb} sauvegardé: {convergence_path}")
     
     
-    def _save_comparison_gif(self, target_seq, nca_seq, obstacle_mask, filepath):
+    @staticmethod
+    def _save_comparison_gif(target_seq, nca_seq, obstacle_mask, filepath):
         # type: (List[np.ndarray], List[np.ndarray], np.ndarray, Path) -> None
         """Sauvegarde un GIF de comparaison côte à côte."""
         
@@ -174,13 +174,11 @@ class ProgressiveVisualizer:
         # Graphique de progression globale
         self._plot_curriculum_progression()
         
-        # Comparaison inter-étapes
-        self._plot_stage_comparison()
-        
         print("✅ Résumé visuel complet généré")
     
     
-    def _plot_curriculum_progression(self):
+    @staticmethod
+    def _plot_curriculum_progression():
         """Graphique de la progression globale du curriculum."""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 15))
         
@@ -223,36 +221,5 @@ class ProgressiveVisualizer:
         
         plt.tight_layout()
         plt.savefig(Path(CONFIG.OUTPUT_DIR) / "curriculum_progression.png",
-                    dpi=150, bbox_inches='tight')
-        plt.close()
-    
-    
-    def _plot_stage_comparison(self):
-        """Graphique de comparaison entre étapes."""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 12))
-        
-        stage_names = [stage.get_display_name() for stage in STAGE_MANAGER.get_stages()]
-        
-        ax1.set_ylabel('Perte finale')
-        ax1.set_title('Perte Finale par Étape')
-        ax1.set_yscale('log')
-        
-        # Époques utilisées par étape
-        epochs_used = CONFIG.NB_EPOCHS_BY_STAGE
-        
-        x = np.arange(len(stage_names))
-        width = 0.35
-        
-        ax2.bar(x + width / 2, epochs_used, width, label='Utilisées', alpha=0.7, color='darkblue')
-        
-        ax2.set_xlabel('Étape')
-        ax2.set_ylabel('Nombre d\'époques')
-        ax2.set_title('Époques Prévues vs Utilisées')
-        ax2.set_xticks(x)
-        ax2.set_xticklabels(stage_names, rotation=15)
-        ax2.legend()
-        
-        plt.tight_layout()
-        plt.savefig(Path(CONFIG.OUTPUT_DIR) / "stage_comparison.png",
                     dpi=150, bbox_inches='tight')
         plt.close()

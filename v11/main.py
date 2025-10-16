@@ -6,21 +6,15 @@ import time
 import numpy as np
 import torch
 
-from nca_model import ImprovedNCA
+from nca_model import NCA
 from stage_manager import STAGE_MANAGER
-from trainer import ModularTrainer
+from trainer import Trainer
 from visualizer import ProgressiveVisualizer
 
 # Hack for imports
 sys.path.append(os.path.dirname(__file__))
 
-from config import CONFIG
-from torching import DEVICE
-
-# =============================================================================
-# Configuration et initialisation modulaire
-# =============================================================================
-
+from config import CONFIG, DEVICE
 
 # Initialisation
 torch.manual_seed(CONFIG.SEED)
@@ -47,14 +41,14 @@ def main():
     try:
         # Initialisation du modèle
         print("\n🔧 Initialisation du modèle...")
-        model = ImprovedNCA(input_size=11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
-                            ).to(DEVICE)
+        model = NCA(input_size=11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
+                    ).to(DEVICE)
         
         print(f"📊 Nombre de paramètres dans le modèle: {sum(p.numel() for p in model.parameters()):,}")
         
         # Initialisation de l'entraîneur modulaire
         print("🎯 Initialisation de l'entraîneur modulaire...")
-        trainer = ModularTrainer(model)
+        trainer = Trainer(model)
         
         # Lancement de l'entraînement complet
         print("🚀 Lancement de l'entraînement modulaire...")
@@ -68,7 +62,7 @@ def main():
         visualizer = ProgressiveVisualizer()
         
         # Visualisation par étape avec le modèle final
-        for stage in STAGE_MANAGER.get_stages():  # stage_nb in [1, 2, 3]:
+        for stage in STAGE_MANAGER.get_stages():
             visualizer.visualize_stage_results(model, stage)
         
         # Résumé visuel complet du curriculum
@@ -81,13 +75,6 @@ def main():
         print(f"📁 Résultats sauvegardés dans: {CONFIG.OUTPUT_DIR}")
         print(f"⏱️  Temps total: {f"{(after - before) / 60:.1f} min"}")
         print(f"📊 Époques: {CONFIG.TOTAL_EPOCHS}")
-        
-        print(f"\n🎨 Fichiers de visualisation générés:")
-        print(f"   • Animations par étape: stage_X/")
-        print(f"   • Progression curriculum: curriculum_progression.png")
-        print(f"   • Comparaison étapes: stage_comparison.png")
-        print(f"   • Résumé performance: performance_summary.png")
-        print(f"   • Métriques complètes: complete_metrics.json")
     
     except KeyboardInterrupt:
         print(f"\n⚠️  Entraînement interrompu par l'utilisateur")
