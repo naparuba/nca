@@ -1,9 +1,11 @@
-from typing import List
+from typing import List, TYPE_CHECKING
 
-from stages.base_stage import BaseStage
 from stages.stage_1_no_obstacle import Stage1NoObstacle
 from stages.stage_2_one_obstacle import Stage2OneObstacle
 from stages.stage_3_few_obstacles import Stage3FewObstacles
+
+if TYPE_CHECKING:
+    from stages.base_stage import BaseStage
 
 
 class StageManager:

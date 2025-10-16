@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from nca_model import ImprovedNCA
+from stage_manager import STAGE_MANAGER
 from trainer import ModularTrainer
 from visualizer import ProgressiveVisualizer
 
@@ -67,8 +68,8 @@ def main():
         visualizer = ProgressiveVisualizer()
         
         # Visualisation par étape avec le modèle final
-        for stage_nb in [1, 2, 3]:
-            visualizer.visualize_stage_results(model, stage_nb)
+        for stage in STAGE_MANAGER.get_stages():  # stage_nb in [1, 2, 3]:
+            visualizer.visualize_stage_results(model, stage)
         
         # Résumé visuel complet du curriculum
         visualizer.create_curriculum_summary()

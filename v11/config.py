@@ -41,6 +41,9 @@ class ModularConfig:
         # Optimisations
         self.CACHE_SIZE = 200
         self.USE_MIXED_PRECISION = False
+        
+        # STAGE CACHE SIZES
+        self.STAGE_CACHE_SIZE = 250
 
 
 CONFIG = ModularConfig()

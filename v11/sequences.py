@@ -1,5 +1,11 @@
+import random
+from typing import TYPE_CHECKING
+
 from config import CONFIG
 from simulator import get_simulator
+
+if TYPE_CHECKING:
+    from stages.base_stage import BaseStage
 
 
 class OptimizedSequenceCache:
@@ -10,18 +16,20 @@ class OptimizedSequenceCache:
     
     
     def __init__(self):
-        self.simulator = get_simulator()
-        self.stage_caches = {}  # Cache par étape
-        self.cache_sizes = {1: 150, 2: 200, 3: 250}  # Plus de variété pour étapes complexes
-        self.current_indices = {}
+        self._simulator = get_simulator()
+        self._stage_caches = {}  # Cache par étape
+        self._current_indices = {}
     
     
-    def initialize_stage_cache(self, stage_nb: int):
+    def initialize_stage_cache(self, stage):
+        # type: (BaseStage) -> None
         """Initialise le cache pour une étape spécifique."""
-        if stage_nb in self.stage_caches:
+        
+        stage_nb = stage.get_stage_nb()
+        if stage_nb in self._stage_caches:
             return  # Déjà initialisé
         
-        cache_size = self.cache_sizes.get(stage_nb, 200)
+        cache_size = CONFIG.STAGE_CACHE_SIZE
         print(f"🎯 Génération de {cache_size} séquences pour l'étape {stage_nb}...", end='', flush=True)
         
         sequences = []
@@ -29,8 +37,8 @@ class OptimizedSequenceCache:
             if i % 50 == 0:
                 print(f"\r   Étape {stage_nb}: {i}/{cache_size}                                 ", end='', flush=True)
             
-            target_seq, source_mask, obstacle_mask = self.simulator.generate_stage_sequence(
-                    stage_nb=stage_nb,
+            target_seq, source_mask, obstacle_mask = self._simulator.generate_stage_sequence(
+                    stage=stage,
                     n_steps=CONFIG.NCA_STEPS,
                     size=CONFIG.GRID_SIZE
             )
@@ -42,36 +50,39 @@ class OptimizedSequenceCache:
                 'stage_nb':      stage_nb
             })
         
-        self.stage_caches[stage_nb] = sequences
-        self.current_indices[stage_nb] = 0
+        self._stage_caches[stage_nb] = sequences
+        self._current_indices[stage_nb] = 0
         print(f"\r✅ Cache étape {stage_nb} créé ({cache_size} séquences)")
     
     
-    def get_stage_batch(self, stage_nb: int, batch_size: int):
+    def get_stage_batch(self, stage, batch_size):
+        # type: (BaseStage, int) -> list
         """Récupère un batch pour l'étape spécifiée."""
-        if stage_nb not in self.stage_caches:
-            self.initialize_stage_cache(stage_nb)
+        stage_nb = stage.get_stage_nb()
+        if stage_nb not in self._stage_caches:
+            self.initialize_stage_cache(stage)
         
-        cache = self.stage_caches[stage_nb]
+        cache = self._stage_caches[stage_nb]
         batch = []
         
         for _ in range(batch_size):
-            batch.append(cache[self.current_indices[stage_nb]])
-            self.current_indices[stage_nb] = (self.current_indices[stage_nb] + 1) % len(cache)
+            batch.append(cache[self._current_indices[stage_nb]])
+            self._current_indices[stage_nb] = (self._current_indices[stage_nb] + 1) % len(cache)
         
         return batch
     
     
-    def shuffle_stage_cache(self, stage_nb: int):
+    def shuffle_stage_cache(self, stage_nb):
+        # type: (int) -> None
         """Mélange le cache d'une étape spécifique."""
-        if stage_nb in self.stage_caches:
-            import random
-            random.shuffle(self.stage_caches[stage_nb])
+        if stage_nb in self._stage_caches:
+            random.shuffle(self._stage_caches[stage_nb])
     
     
-    def clear_stage_cache(self, stage_nb: int):
+    def clear_stage_cache(self, stage_nb):
+        # type: (int) -> None
         """Libère la mémoire du cache d'une étape."""
-        if stage_nb in self.stage_caches:
-            del self.stage_caches[stage_nb]
-            del self.current_indices[stage_nb]
+        if stage_nb in self._stage_caches:
+            del self._stage_caches[stage_nb]
+            del self._current_indices[stage_nb]
             print(f"🗑️  Cache étape {stage_nb} libéré")

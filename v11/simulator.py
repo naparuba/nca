@@ -1,11 +1,13 @@
-from typing import Tuple, List
+from typing import Tuple, List, TYPE_CHECKING
 
 import torch
 from torch.nn import functional as F
 
 from config import CONFIG
 from torching import DEVICE
-from obstacles import ProgressiveObstacleManager
+
+if TYPE_CHECKING:
+    from stages.base_stage import BaseStage
 
 
 # =============================================================================
@@ -20,10 +22,10 @@ class HeatDiffusionSimulator:
     
     def __init__(self):
         self.kernel = torch.ones((1, 1, 3, 3), device=DEVICE) / 9.0  # Average 3x3
-        self.obstacle_manager = ProgressiveObstacleManager()
     
     
-    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
+    def step(self, grid, source_mask, obstacle_mask):
+        # type: (torch.Tensor, torch.Tensor, torch.Tensor) -> torch.Tensor
         """Un pas de diffusion de chaleur avec obstacles."""
         x = grid.unsqueeze(0).unsqueeze(0)
         new_grid = F.conv2d(x, self.kernel, padding=1).squeeze(0).squeeze(0)
@@ -35,12 +37,13 @@ class HeatDiffusionSimulator:
         return new_grid
     
     
-    def generate_stage_sequence(self, stage_nb: int, n_steps: int, size: int) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
+    def generate_stage_sequence(self, stage, n_steps, size):
+        # type: (BaseStage, int, int) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]
         """
         Génère une séquence adaptée à l'étape d'apprentissage courante.
         
         Args:
-            stage_nb: Étape d'apprentissage (1, 2, ou 3)
+            stage: Stage
             n_steps: Nombre d'étapes de simulation
             size: Taille de la grille
             
@@ -54,7 +57,7 @@ class HeatDiffusionSimulator:
         j0 = torch.randint(2, size - 2, (1,), generator=g, device=DEVICE).item()
         
         # Génération d'obstacles selon l'étape
-        obstacle_mask = self.obstacle_manager.generate_stage_environment(stage_nb, size, (i0, j0))
+        obstacle_mask = stage.generate_environment(size, (i0, j0))
         
         # Initialisation
         grid = torch.zeros((size, size), device=DEVICE)
@@ -77,6 +80,7 @@ class HeatDiffusionSimulator:
 
 
 simulator = None
+
 
 def get_simulator() -> HeatDiffusionSimulator:
     global simulator

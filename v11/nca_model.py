@@ -3,6 +3,7 @@ from torch import nn as nn
 
 from config import CONFIG
 
+
 # =============================================================================
 # Modèle NCA
 # =============================================================================
@@ -13,7 +14,8 @@ class ImprovedNCA(nn.Module):
     """
     
     
-    def __init__(self, input_size: int):
+    def __init__(self, input_size):
+        # type: (int) -> None
         super().__init__()
         
         self.input_size = input_size
@@ -39,7 +41,8 @@ class ImprovedNCA(nn.Module):
         self.delta_scale = 0.1
     
     
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x):
+        # type: (torch.Tensor) -> torch.Tensor
         """Forward pass avec scaling des deltas."""
         delta = self.network(x)
         return delta * self.delta_scale

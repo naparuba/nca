@@ -1,7 +1,10 @@
+from typing import TYPE_CHECKING
+
 import torch
 from torch.nn import functional as F
 
-from nca_model import ImprovedNCA
+if TYPE_CHECKING:
+    from nca_model import ImprovedNCA
 
 
 class OptimizedNCAUpdater:
@@ -10,11 +13,13 @@ class OptimizedNCAUpdater:
     """
     
     
-    def __init__(self, model: ImprovedNCA):
+    def __init__(self, model):
+        # type: (ImprovedNCA) -> None
         self.model = model
     
     
-    def step(self, grid: torch.Tensor, source_mask: torch.Tensor, obstacle_mask: torch.Tensor) -> torch.Tensor:
+    def step(self, grid, source_mask, obstacle_mask):
+        # type: (torch.Tensor, torch.Tensor, torch.Tensor) -> torch.Tensor
         """Application optimisée du NCA."""
         H, W = grid.shape
         

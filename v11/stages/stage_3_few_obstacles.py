@@ -1,12 +1,9 @@
 from typing import Tuple
 
 import torch
-
-
+from config import CONFIG
 from stages.base_stage import BaseStage
 from torching import DEVICE
-from config import CONFIG
-
 
 
 class Stage3FewObstacles(BaseStage):
@@ -16,6 +13,7 @@ class Stage3FewObstacles(BaseStage):
     
     MIN_OBSTACLE_SIZE = 2
     MAX_OBSTACLE_SIZE = 4
+    
     
     def _validate_connectivity(self, obstacle_mask: torch.Tensor, source_pos: Tuple[int, int]) -> bool:
         """
@@ -53,33 +51,6 @@ class Stage3FewObstacles(BaseStage):
         
         return connectivity_ratio >= 0.5
     
-    def _generate_stage_2_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
-        """Fallback vers un environnement plus simple (un seul obstacle)."""
-        obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
-        
-        g = torch.Generator(device=DEVICE)
-        g.manual_seed(CONFIG.SEED)
-        
-        # Un seul obstacle de taille aléatoire
-        obstacle_size = torch.randint(CONFIG.MIN_OBSTACLE_SIZE, CONFIG.MAX_OBSTACLE_SIZE + 1,
-                                      (1,), generator=g, device=DEVICE).item()
-        
-        max_pos = size - obstacle_size
-        if max_pos <= 1:
-            return obstacle_mask
-        
-        source_i, source_j = source_pos
-        
-        for attempt in range(100):
-            i = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
-            j = torch.randint(1, max_pos, (1,), generator=g, device=DEVICE).item()
-            
-            # Vérifier non-chevauchement avec source
-            if not (i <= source_i < i + obstacle_size and j <= source_j < j + obstacle_size):
-                obstacle_mask[i:i + obstacle_size, j:j + obstacle_size] = True
-                break
-        
-        return obstacle_mask
     
     def generate_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
         """Étape 3: Obstacles multiples pour gestion de la complexité."""
@@ -125,7 +96,7 @@ class Stage3FewObstacles(BaseStage):
         
         # Validation finale de connectivité
         if not self._validate_connectivity(obstacle_mask, source_pos):
-            print("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
-            return self._generate_stage_2_environment(size, source_pos)
+            raise Exception("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
+            # return self._generate_stage_2_environment(size, source_pos)
         
         return obstacle_mask

@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import List
+from typing import List, TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -8,12 +8,13 @@ from torch import optim as optim, nn as nn
 
 from config import CONFIG
 from nca_model import ImprovedNCA
-from scheduler import CurriculumScheduler
 from sequences import OptimizedSequenceCache
 from stage_manager import STAGE_MANAGER
-from stages.base_stage import BaseStage
 from torching import DEVICE
 from updater import OptimizedNCAUpdater
+
+if TYPE_CHECKING:
+    from stages.base_stage import BaseStage
 
 
 class ModularTrainer:
@@ -35,14 +36,10 @@ class ModularTrainer:
         self._loss_fn = nn.MSELoss()
         
         # Curriculum
-        self._curriculum = CurriculumScheduler()
+        # self._curriculum = CurriculumScheduler()
         
         # Cache optimisé par étape
         self._sequence_cache = OptimizedSequenceCache()
-        
-        # État d'entraînement
-        # self._stage_start_epochs = {}
-        # self._total_epochs_trained = 0
     
     
     def _train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor,
@@ -87,7 +84,24 @@ class ModularTrainer:
         return avg_loss.item()
     
     
-    def _train_stage(self, stage: BaseStage, max_epochs: int) -> None:
+    def _adjust_learning_rate(self, stage_nb: int, epoch_in_stage: int):
+        """Ajuste le learning rate selon l'étape et la progression."""
+        
+        base_lr = CONFIG.LEARNING_RATE
+        
+        # Réduction progressive par étape, from 1.0 -> 0.6
+        stage_lr = base_lr * (1.0 - ((stage_nb - 1) / (len(STAGE_MANAGER.get_stages()) - 1)) * 0.4)
+        
+        # Décroissance cosine au sein de l'étape
+        cos_factor = 0.5 * (1 + np.cos(np.pi * epoch_in_stage / CONFIG.NB_EPOCHS_BY_STAGE))
+        final_lr = stage_lr * (0.1 + 0.9 * cos_factor)  # Ne descends pas sous 10% du LR de base
+        
+        for param_group in self._optimizer.param_groups:
+            param_group['lr'] = final_lr
+    
+    
+    def _train_stage(self, stage, max_epochs):
+        # type: (BaseStage, int) -> dict
         """
         Entraînement complet d'une étape spécifique.
 
@@ -107,7 +121,7 @@ class ModularTrainer:
         # self._stage_start_epochs[stage_nb] = self._total_epochs_trained
         
         # Initialisation du cache pour cette étape
-        self._sequence_cache.initialize_stage_cache(stage_nb)
+        self._sequence_cache.initialize_stage_cache(stage)
         
         # Métriques de l'étape
         stage_losses = []
@@ -119,7 +133,7 @@ class ModularTrainer:
             epoch_losses = []
             
             # Ajustement du learning rate si curriculum activé
-            self._curriculum.adjust_learning_rate(self._optimizer, stage_nb, epoch_in_stage)
+            self._adjust_learning_rate(stage_nb, epoch_in_stage)
             
             # Mélange périodique du cache
             if epoch_in_stage % 20 == 0:
@@ -127,7 +141,7 @@ class ModularTrainer:
             
             # Entraînement par batch
             for _ in range(CONFIG.BATCH_SIZE):
-                batch_sequences = self._sequence_cache.get_stage_batch(stage_nb, 1)
+                batch_sequences = self._sequence_cache.get_stage_batch(stage, 1)
                 seq_data = batch_sequences[0]
                 target_seq = seq_data['target_seq']
                 source_mask = seq_data['source_mask']
@@ -162,8 +176,6 @@ class ModularTrainer:
         # Libération du cache de l'étape précédente pour économiser la mémoire
         if stage_nb > 1:
             self._sequence_cache.clear_stage_cache(stage_nb - 1)
-        
-        return
     
     
     def train_full_curriculum(self) -> None:

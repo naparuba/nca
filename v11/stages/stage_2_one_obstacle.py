@@ -1,16 +1,16 @@
 from typing import Tuple
 
 import torch
+from config import CONFIG
 from stages.base_stage import BaseStage
 from torching import DEVICE
-
-from config import CONFIG
 
 
 class Stage2OneObstacle(BaseStage):
     NAME = 'one_obstacle'
     DISPLAY_NAME = "Un obstable"
     COLOR = 'orange'
+    
     
     def generate_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
         """Étape 2: Un seul obstacle pour apprentissage du contournement."""
