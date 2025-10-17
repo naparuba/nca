@@ -95,7 +95,7 @@ class Trainer:
     
     
     def _train_stage(self, stage, max_epochs):
-        # type: (BaseStage, int) -> dict
+        # type: (BaseStage, int) -> None
         """
         Entraînement complet d'une étape spécifique.
 
@@ -130,13 +130,12 @@ class Trainer:
             self._adjust_learning_rate(stage_nb, epoch_in_stage)
             
             # Mélange périodique du cache
-            if epoch_in_stage % 20 == 0:
-                self._sequence_cache.shuffle_stage_cache(stage_nb)
+            #if epoch_in_stage % 20 == 0:
+            #    self._sequence_cache.shuffle_stage_cache(stage_nb)
             
             # Entraînement par batch
             for _ in range(CONFIG.BATCH_SIZE):
-                batch_sequences = self._sequence_cache.get_stage_batch(stage, 1)
-                seq_data = batch_sequences[0]
+                seq_data = self._sequence_cache.get_stage_sample(stage)
                 target_seq = seq_data['target_seq']
                 source_mask = seq_data['source_mask']
                 obstacle_mask = seq_data['obstacle_mask']

@@ -54,21 +54,20 @@ class OptimizedSequenceCache:
         print(f"\r✅ Cache étape {stage_nb} créé ({cache_size} séquences)")
     
     
-    def get_stage_batch(self, stage, batch_size):
-        # type: (BaseStage, int) -> list
-        """Récupère un batch pour l'étape spécifiée."""
+    def get_stage_sample(self, stage):
+        # type: (BaseStage) -> dict
+        """Récupère un échantillon pour l'étape spécifiée."""
         stage_nb = stage.get_stage_nb()
         if stage_nb not in self._stage_caches:
             self.initialize_stage_cache(stage)
         
         cache = self._stage_caches[stage_nb]
-        batch = []
         
-        for _ in range(batch_size):
-            batch.append(cache[self._current_indices[stage_nb]])
-            self._current_indices[stage_nb] = (self._current_indices[stage_nb] + 1) % len(cache)
+        # Récupère l'échantillon courant et avance l'index
+        sample = cache[self._current_indices[stage_nb]]
+        self._current_indices[stage_nb] = (self._current_indices[stage_nb] + 1) % len(cache)
         
-        return batch
+        return sample
     
     
     def shuffle_stage_cache(self, stage_nb):

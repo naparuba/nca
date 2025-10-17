@@ -3,6 +3,7 @@ from typing import Tuple
 import torch
 from config import DEVICE
 from stages.base_stage import BaseStage
+from torched import get_matrix_boolean
 
 
 class Stage1NoObstacle(BaseStage):
@@ -11,6 +12,7 @@ class Stage1NoObstacle(BaseStage):
     COLOR = 'green'
     
     
-    def generate_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    def generate_environment(self, size, source_pos):
+        # type: (int, Tuple[int, int]) -> torch.Tensor
         """Étape 1: Aucun obstacle - grille vide pour apprentissage de base."""
-        return torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
+        return get_matrix_boolean((size, size), False)

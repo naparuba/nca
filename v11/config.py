@@ -1,6 +1,4 @@
-import torch
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+from torched import DEVICE
 
 
 class ModularConfig:
@@ -16,7 +14,7 @@ class ModularConfig:
         
         self.VISUALIZATION_SEED = 3333
         
-        self.NB_EPOCHS_BY_STAGE = 30
+        self.NB_EPOCHS_BY_STAGE = 30#200
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
         
@@ -49,6 +47,8 @@ class ModularConfig:
         
         # STAGE CACHE SIZES
         self.STAGE_CACHE_SIZE = 250
+        
+        self.DEVICE = DEVICE
 
 
 CONFIG = ModularConfig()
