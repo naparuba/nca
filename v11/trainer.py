@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import List, TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ from stage_manager import STAGE_MANAGER
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
+    from sequence import SimulationSequence
 
 
 class Trainer:
@@ -36,21 +37,23 @@ class Trainer:
         self._sequence_cache = OptimizedSequenceCache()
     
     
-    def _train_step(self, target_sequence: List[torch.Tensor], source_mask: torch.Tensor,
-                    obstacle_mask: torch.Tensor) -> float:
+    def _train_step(self, sequence):
+        # type: (SimulationSequence) -> float
+        
         """
         Un pas d'entraînement adapté à l'étape courante.
 
         Args:
-            target_sequence: Séquence cible
-            source_mask: Masque des sources
-            obstacle_mask: Masque des obstacles
-            stage_nb: Étape courante d'entraînement
-
+            sequence: Sequence d'entraînement
         Returns:
             Perte pour ce pas
         """
+        
         self._optimizer.zero_grad()
+        
+        target_sequence = sequence.get_target_sequence()
+        source_mask = sequence.get_source_mask()
+        obstacle_mask = sequence.get_obstacle_mask()
         
         # Initialisation
         grid_pred = torch.zeros_like(target_sequence[0])
@@ -108,11 +111,9 @@ class Trainer:
         """
         stage_nb = stage.get_stage_nb()
         print(f"\n🎯 === ÉTAPE {stage_nb} - DÉBUT ===")
-        # stage_name = {1: "Sans obstacles", 2: "Un obstacle", 3: "Obstacles multiples"}[stage_nb]
         print(f"📋 {stage.get_display_name()}")
         print(f"⏱️  Maximum {max_epochs} époques")
         
-        # self._stage_start_epochs[stage_nb] = self._total_epochs_trained
         
         # Initialisation du cache pour cette étape
         self._sequence_cache.initialize_stage_cache(stage)
@@ -124,23 +125,19 @@ class Trainer:
         
         # Boucle d'entraînement de l'étape
         for epoch_in_stage in range(max_epochs):
-            epoch_losses = []
+            epoch_losses = []  # type: List[float]
             
             # Ajustement du learning rate si curriculum activé
             self._adjust_learning_rate(stage_nb, epoch_in_stage)
             
             # Mélange périodique du cache
-            #if epoch_in_stage % 20 == 0:
+            # if epoch_in_stage % 20 == 0:
             #    self._sequence_cache.shuffle_stage_cache(stage_nb)
             
             # Entraînement par batch
             for _ in range(CONFIG.BATCH_SIZE):
-                seq_data = self._sequence_cache.get_stage_sample(stage)
-                target_seq = seq_data['target_seq']
-                source_mask = seq_data['source_mask']
-                obstacle_mask = seq_data['obstacle_mask']
-                
-                loss = self._train_step(target_seq, source_mask, obstacle_mask)
+                sequence = self._sequence_cache.get_stage_sample(stage)
+                loss = self._train_step(sequence)  # type: float
                 epoch_losses.append(loss)
             
             # Statistiques de l'époque
@@ -148,8 +145,6 @@ class Trainer:
             stage_losses.append(avg_epoch_loss)
             current_lr = self._optimizer.param_groups[0]['lr']
             stage_lrs.append(current_lr)
-            
-            # self._total_epochs_trained += 1
             
             # Affichage périodique
             if epoch_in_stage % 10 == 0 or epoch_in_stage == max_epochs - 1:

@@ -2,6 +2,7 @@ import random
 from typing import TYPE_CHECKING
 
 from config import CONFIG
+from simulation_sequence import SimulationSequence
 from simulator import get_simulator
 
 if TYPE_CHECKING:
@@ -16,7 +17,7 @@ class OptimizedSequenceCache:
     
     
     def __init__(self):
-        self._stage_caches = {}  # Cache par étape
+        self._stage_caches = {}  # Type: Dict[int, List[Sequence]]
         self._current_indices = {}
     
     
@@ -31,23 +32,19 @@ class OptimizedSequenceCache:
         cache_size = CONFIG.STAGE_CACHE_SIZE
         print(f"🎯 Génération de {cache_size} séquences pour l'étape {stage_nb}...", end='', flush=True)
         
-        sequences = []
+        sequences = []  # :Type: List[Sequence]
         for i in range(cache_size):
             if i % 50 == 0:
                 print(f"\r   Étape {stage_nb}: {i}/{cache_size}                                 ", end='', flush=True)
             
-            target_seq, source_mask, obstacle_mask = get_simulator().generate_stage_sequence(
+            target_sequence, source_mask, obstacle_mask = get_simulator().generate_stage_sequence(
                     stage=stage,
                     n_steps=CONFIG.NCA_STEPS,
                     size=CONFIG.GRID_SIZE
             )
             
-            sequences.append({
-                'target_seq':    target_seq,
-                'source_mask':   source_mask,
-                'obstacle_mask': obstacle_mask,
-                'stage_nb':      stage_nb
-            })
+            sequence = SimulationSequence(target_sequence, source_mask, obstacle_mask)
+            sequences.append(sequence)
         
         self._stage_caches[stage_nb] = sequences
         self._current_indices[stage_nb] = 0
@@ -55,19 +52,19 @@ class OptimizedSequenceCache:
     
     
     def get_stage_sample(self, stage):
-        # type: (BaseStage) -> dict
+        # type: (BaseStage) -> SimulationSequence
         """Récupère un échantillon pour l'étape spécifiée."""
         stage_nb = stage.get_stage_nb()
-        if stage_nb not in self._stage_caches:
-            self.initialize_stage_cache(stage)
+        #        if stage_nb not in self._stage_caches:
+        self.initialize_stage_cache(stage)
         
         cache = self._stage_caches[stage_nb]
         
         # Récupère l'échantillon courant et avance l'index
-        sample = cache[self._current_indices[stage_nb]]
+        sequence = cache[self._current_indices[stage_nb]]  # type: SimulationSequence
         self._current_indices[stage_nb] = (self._current_indices[stage_nb] + 1) % len(cache)
         
-        return sample
+        return sequence
     
     
     def shuffle_stage_cache(self, stage_nb):
