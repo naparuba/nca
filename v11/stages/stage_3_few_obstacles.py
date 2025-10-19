@@ -5,7 +5,6 @@ from config import CONFIG, DEVICE
 from stages.base_stage import BaseStage
 
 
-
 class Stage3FewObstacles(BaseStage):
     NAME = 'few_obstacles'
     DISPLAY_NAME = "Obstables multiples"
@@ -52,7 +51,7 @@ class Stage3FewObstacles(BaseStage):
         return connectivity_ratio >= 0.5
     
     
-    def generate_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    def generate_obstacles(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
         """Étape 3: Obstacles multiples pour gestion de la complexité."""
         obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
         
@@ -97,6 +96,5 @@ class Stage3FewObstacles(BaseStage):
         # Validation finale de connectivité
         if not self._validate_connectivity(obstacle_mask, source_pos):
             raise Exception("⚠️  Connectivité non garantie - génération d'un environnement plus simple")
-            # return self._generate_stage_2_environment(size, source_pos)
         
         return obstacle_mask

@@ -12,7 +12,7 @@ class Stage2OneObstacle(BaseStage):
     COLOR = 'orange'
     
     
-    def generate_environment(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    def generate_obstacles(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
         """Étape 2: Un seul obstacle pour apprentissage du contournement."""
         obstacle_mask = torch.zeros((size, size), dtype=torch.bool, device=DEVICE)
         

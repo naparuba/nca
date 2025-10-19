@@ -6,14 +6,9 @@ from config import CONFIG
 
 
 # =============================================================================
-# Modèle NCA
+# Modèle NCA: Neural Cellular Automaton optimisé pour l'apprentissage modulaire
 # =============================================================================
 class NCA(nn.Module):
-    """
-    Neural Cellular Automaton optimisé pour l'apprentissage modulaire.
-    Architecture identique à v6 mais avec support étendu pour le curriculum.
-    """
-    
     
     def __init__(self, input_size):
         # type: (int) -> None

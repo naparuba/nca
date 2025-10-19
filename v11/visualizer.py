@@ -29,8 +29,6 @@ class ProgressiveVisualizer:
         Args:
             model: Modèle NCA entraîné
             stage: Numéro d'étape à visualiser
-        Returns:
-            Dictionnaire avec les données de visualisation
         """
         
         stage_nb = stage.get_stage_nb()
@@ -41,18 +39,18 @@ class ProgressiveVisualizer:
         torch.manual_seed(CONFIG.VISUALIZATION_SEED)
         np.random.seed(CONFIG.VISUALIZATION_SEED)
         
-        reality_sequence = stage.generate_reality_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
+        reality_sequence = stage.generate_simulation_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
         
         # Prédiction du modèle
         model.eval()
         
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
-        simulation_sequence = reality_sequence.get_target_sequence()
+        reality_worlds = reality_sequence.get_reality_worlds()
         source_mask = reality_sequence.get_source_mask()
         obstacle_mask = reality_sequence.get_obstacle_mask()
         
         nca_sequence = []
-        grid_pred = torch.zeros_like(simulation_sequence[0])
+        grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
         grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
         nca_sequence.append(grid_pred.clone())
         
@@ -64,7 +62,7 @@ class ProgressiveVisualizer:
         # Création des visualisations avec .detach() pour sécurité
         vis_data = {
             'stage_nb':        stage_nb,
-            'target_sequence': [t.detach().cpu().numpy() for t in simulation_sequence],
+            'target_sequence': [t.get_as_tensor().detach().cpu().numpy() for t in reality_worlds],
             'nca_sequence':    [t.detach().cpu().numpy() for t in nca_sequence],
             'source_mask':     source_mask.detach().cpu().numpy(),
             'obstacle_mask':   obstacle_mask.detach().cpu().numpy(),

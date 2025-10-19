@@ -12,7 +12,7 @@ class Stage1NoObstacle(BaseStage):
     COLOR = 'green'
     
     
-    def generate_environment(self, size, source_pos):
+    def generate_obstacles(self, size, source_pos):
         # type: (int, Tuple[int, int]) -> torch.Tensor
         """Étape 1: Aucun obstacle - grille vide pour apprentissage de base."""
         return get_matrix_boolean((size, size), False)

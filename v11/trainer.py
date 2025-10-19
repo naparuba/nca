@@ -11,7 +11,7 @@ from torched import AdamW, get_MSELoss
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
-    from simulation_sequence import SimulationSequence
+    from simulation_sequence import SimulationTemporalSequence
     from nca_model import NCA
 
 
@@ -32,7 +32,7 @@ class Trainer:
     
     
     def _train_step(self, sequence):
-        # type: (SimulationSequence) -> float
+        # type: (SimulationTemporalSequence) -> float
         
         """
         Un pas d'entraînement adapté à l'étape courante.
@@ -45,19 +45,19 @@ class Trainer:
         
         self._optimizer.zero_grad()
         
-        target_sequence = sequence.get_target_sequence()
+        reality_worlds = sequence.get_reality_worlds()
         source_mask = sequence.get_source_mask()
         obstacle_mask = sequence.get_obstacle_mask()
         
         # Initialisation
-        grid_pred = torch.zeros_like(target_sequence[0])
+        grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
         grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
         
         total_loss = torch.tensor(0.0, device=DEVICE)
         
         # Déroulement temporel
         for t_step in range(CONFIG.NCA_STEPS):
-            target = target_sequence[t_step + 1]
+            target = reality_worlds[t_step + 1].get_as_tensor()
             grid_pred = self._model.step(grid_pred, source_mask, obstacle_mask)
             
             # Perte pondérée selon l'étape
