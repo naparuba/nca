@@ -14,12 +14,9 @@ class ModularConfig:
         
         self.VISUALIZATION_SEED = 3333
         
-        self.NB_EPOCHS_BY_STAGE = 200
+        self.NB_EPOCHS_BY_STAGE = 30#200
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
-        
-        self.STAGNATION_THRESHOLD = 0.000001  # seuil de stagnation pour avancer d'étape
-        self.STAGNATION_PATIENCE = self.NB_EPOCHS_BY_STAGE // 5  # if we flat for such epochs, we consider it stagnated
         
         # Paramètres de grille
         self.GRID_SIZE = 16

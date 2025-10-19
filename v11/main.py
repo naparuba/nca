@@ -2,6 +2,7 @@ import os
 # HACK for imports
 import sys
 import time
+import traceback
 
 import numpy as np
 import torch
@@ -83,7 +84,6 @@ def main():
     except Exception as e:
         print(f"\n❌ ERREUR lors de l'entraînement:")
         print(f"   {type(e).__name__}: {str(e)}")
-        import traceback
         traceback.print_exc()
         sys.exit(1)
 

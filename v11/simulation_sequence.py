@@ -1,11 +1,12 @@
-from typing import List
+from typing import List, TYPE_CHECKING
 
-import torch
+if TYPE_CHECKING:
+    from torched import Tensor
 
 
 class SimulationSequence:
     def __init__(self, target_sequence, source_mask, obstacle_mask):
-        # type: (List[torch.Tensor], torch.Tensor, torch.Tensor) -> None
+        # type: (List[Tensor], Tensor, Tensor) -> None
         
         self._target_sequence = target_sequence
         self._source_mask = source_mask

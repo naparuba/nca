@@ -4,16 +4,15 @@ from typing import TYPE_CHECKING, List
 
 import numpy as np
 import torch
-from torch import optim as optim, nn as nn
 
 from config import CONFIG, DEVICE
-from nca_model import NCA
-from sequences import OptimizedSequenceCache
 from stage_manager import STAGE_MANAGER
+from torched import AdamW, get_MSELoss
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
-    from sequence import SimulationSequence
+    from simulation_sequence import SimulationSequence
+    from nca_model import NCA
 
 
 class Trainer:
@@ -23,18 +22,13 @@ class Trainer:
     """
     
     
-    def __init__(self, model: NCA):
+    def __init__(self, model):
+        # type: (NCA) -> None
         self._model = model
         
-        # Choix de l'updater optimisé
-        print("🚀 Utilisation de l'updater optimisé vectorisé")
-        
         # Optimiseur et planificateur
-        self._optimizer = optim.AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
-        self._loss_fn = nn.MSELoss()
-        
-        # Cache optimisé par étape
-        self._sequence_cache = OptimizedSequenceCache()
+        self._optimizer = AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
+        self._loss_fn = get_MSELoss()
     
     
     def _train_step(self, sequence):
@@ -81,7 +75,8 @@ class Trainer:
         return avg_loss.item()
     
     
-    def _adjust_learning_rate(self, stage_nb: int, epoch_in_stage: int):
+    def _adjust_learning_rate(self, stage_nb, epoch_in_stage):
+        # type: (int, int) -> None
         """Ajuste le learning rate selon l'étape et la progression."""
         
         base_lr = CONFIG.LEARNING_RATE
@@ -114,9 +109,8 @@ class Trainer:
         print(f"📋 {stage.get_display_name()}")
         print(f"⏱️  Maximum {max_epochs} époques")
         
-        
         # Initialisation du cache pour cette étape
-        self._sequence_cache.initialize_stage_cache(stage)
+        stage.generate_reality_sequences_for_training()
         
         # Métriques de l'étape
         stage_losses = []
@@ -130,13 +124,9 @@ class Trainer:
             # Ajustement du learning rate si curriculum activé
             self._adjust_learning_rate(stage_nb, epoch_in_stage)
             
-            # Mélange périodique du cache
-            # if epoch_in_stage % 20 == 0:
-            #    self._sequence_cache.shuffle_stage_cache(stage_nb)
-            
             # Entraînement par batch
             for _ in range(CONFIG.BATCH_SIZE):
-                sequence = self._sequence_cache.get_stage_sample(stage)
+                sequence = stage.get_sequences_for_training()
                 loss = self._train_step(sequence)  # type: float
                 epoch_losses.append(loss)
             
@@ -160,19 +150,9 @@ class Trainer:
         # Sauvegarde du checkpoint d'étape
         stage = STAGE_MANAGER.get_stage(stage_nb)
         stage.save_stage_checkpoint(self._model.state_dict(), self._optimizer.state_dict())
-        
-        # Libération du cache de l'étape précédente pour économiser la mémoire
-        if stage_nb > 1:
-            self._sequence_cache.clear_stage_cache(stage_nb - 1)
     
     
     def train_full_curriculum(self) -> None:
-        """
-        Entraînement complet du curriculum en 3 étapes.
-
-        Returns:
-            Métriques complètes de l'entraînement modulaire
-        """
         print(f"\n🚀 === DÉBUT ENTRAÎNEMENT MODULAIRE ===")
         print(f"🎯 Seed: {CONFIG.SEED}")
         print(f"📊 Époques totales prévues: {CONFIG.TOTAL_EPOCHS}")
@@ -205,7 +185,6 @@ class Trainer:
         torch.save({
             'model_state_dict':     self._model.state_dict(),
             'optimizer_state_dict': self._optimizer.state_dict(),
-            # 'global_metrics':       global_metrics_,
             'config':               CONFIG.__dict__
         }, final_model_path)
         

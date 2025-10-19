@@ -8,7 +8,6 @@ from matplotlib import pyplot as plt
 
 from config import CONFIG
 from nca_model import NCA
-from simulator import get_simulator
 from stage_manager import STAGE_MANAGER
 
 if TYPE_CHECKING:
@@ -42,18 +41,18 @@ class ProgressiveVisualizer:
         torch.manual_seed(CONFIG.VISUALIZATION_SEED)
         np.random.seed(CONFIG.VISUALIZATION_SEED)
         
-        target_seq, source_mask, obstacle_mask = get_simulator().generate_stage_sequence(
-                stage=stage,
-                n_steps=CONFIG.POSTVIS_STEPS,
-                size=CONFIG.GRID_SIZE
-        )
+        reality_sequence = stage.generate_reality_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
         
         # Prédiction du modèle
         model.eval()
         
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
+        simulation_sequence = reality_sequence.get_target_sequence()
+        source_mask = reality_sequence.get_source_mask()
+        obstacle_mask = reality_sequence.get_obstacle_mask()
+        
         nca_sequence = []
-        grid_pred = torch.zeros_like(target_seq[0])
+        grid_pred = torch.zeros_like(simulation_sequence[0])
         grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
         nca_sequence.append(grid_pred.clone())
         
@@ -65,7 +64,7 @@ class ProgressiveVisualizer:
         # Création des visualisations avec .detach() pour sécurité
         vis_data = {
             'stage_nb':        stage_nb,
-            'target_sequence': [t.detach().cpu().numpy() for t in target_seq],
+            'target_sequence': [t.detach().cpu().numpy() for t in simulation_sequence],
             'nca_sequence':    [t.detach().cpu().numpy() for t in nca_sequence],
             'source_mask':     source_mask.detach().cpu().numpy(),
             'obstacle_mask':   obstacle_mask.detach().cpu().numpy(),
