@@ -1,332 +1,291 @@
-# Spécification: NCA Modulaire v11 - Architecture Découplée
+# Spécifications Complètes - NCA Modulaire v11
+## Architecture de Visualisation Modulaire et Système de Stages Simplifié
 
-## Vue d'ensemble
+*Version v11 - 19 octobre 2025*
 
-**Version 11** représente une refactorisation majeure vers une architecture découplée et modulaire pour l'apprentissage progressif des Neural Cellular Automata (NCA). Le système implémente un curriculum d'apprentissage en 3 étapes avec une séparation claire des responsabilités.
+---
 
-## Architecture Modulaire - État Actuel
+## Vue d'Ensemble du Système
 
-### Philosophie de Conception
+Le NCA Modulaire v11 représente une **évolution majeure vers la modularisation** en se concentrant sur la **séparation claire des responsabilités** et l'**architecture de visualisation avancée**. Cette version privilégie la simplicité d'architecture tout en conservant la puissance du système modulaire de stages.
 
-L'architecture v11 suit les principes suivants:
-- **Séparation des responsabilités**: Chaque module a une responsabilité unique et bien définie
-- **Découplage**: Les modules communiquent via des interfaces claires
-- **Extensibilité**: Ajout facile de nouvelles étapes ou fonctionnalités
-- **Singleton pattern**: Utilisation de singletons pour les gestionnaires globaux (STAGE_MANAGER, simulator)
+### Innovation Principale : Architecture Modulaire Épurée
 
-### Structure Actuelle des Modules
+- **Séparation visualisation/simulation** : Découplage complet entre génération de données et visualisation
+- **Système de stages simplifié** : Architecture modulaire basée sur des classes de base abstraites
+- **Visualisation progressive** : Système de visualisation spécialisé par étape avec comparaisons temporelles
+- **Configuration centralisée** : Point unique de configuration pour tous les modules
 
+---
+
+## Analyse des Concepts et Architecture Originale
+
+### Concepts Métier Fondamentaux
+
+#### Neural Cellular Automaton (NCA) - Cœur du Système
+- **Paradigme** : Apprentissage distribué avec règles cellulaires neuronales
+- **Architecture cellulaire** : Grille 2D où chaque cellule évolue selon son voisinage
+- **Règle d'évolution** : Réseau neuronal apprend les transitions d'état locales
+- **Contraintes physiques** : Respect des conditions aux limites (sources, obstacles)
+
+#### Diffusion de Chaleur - Modèle Physique
+- **Source thermique** : Points d'émission de chaleur d'intensité variable
+- **Obstacles** : Zones imperméables avec température fixée
+- **Propagation** : Diffusion par convolution locale avec voisinage 3x3
+- **Équilibre thermique** : Convergence vers un état stable
+
+#### RealityWorld - Abstraction de l'Environnement
+- **Monde de référence** : État cible que le NCA doit apprendre à reproduire
+- **Représentation tensorielle** : Grille 2D avec valeurs de température normalisées [0,1]
+- **Masques de contraintes** : Séparation entre sources, obstacles et zones libres
+
+#### SimulationTemporalSequence - Séquence d'Apprentissage
+- **Séquence temporelle** : Suite ordonnée d'états de référence
+- **Génération procédurale** : Création automatique de séquences d'entraînement
+- **Cohérence temporelle** : Respect des lois physiques entre les pas de temps
+
+---
+
+## Spécifications Fonctionnelles
+
+### 1. Architecture Modulaire des Stages
+
+#### Classe BaseStage - Interface Abstraite
+**Responsabilité** : Définir le contrat commun à tous les stages d'apprentissage
+
+**Méthodes clés** :
+- `get_stage_nb()` : Identification unique du stage
+- `generate_simulation_temporal_sequence()` : Génération des données d'entraînement
+- `get_loss_history()` : Historique des pertes pour le suivi de convergence
+- `get_metrics_lrs()` : Évolution du learning rate au cours du temps
+- `get_color()` : Couleur distinctive pour les visualisations
+
+**Architecture découplée** :
+- Chaque stage encapsule sa logique métier spécifique
+- Interface standardisée permettant l'extensibilité
+- Gestion autonome des paramètres d'entraînement
+
+#### Stage1 - Apprentissage de Base
+**Objectif** : Diffusion pure sans obstacles
+
+**Caractéristiques** :
+- Environnement : Grille vide avec source centrale
+- Complexité minimale pour établir les bases
+- Convergence rapide vers l'équilibre thermique simple
+
+#### Stage2 - Introduction d'un Obstacle
+**Objectif** : Apprentissage de la contournement d'obstacle unique
+
+**Caractéristiques** :
+- Un seul obstacle positionné stratégiquement
+- Apprentissage de la diffusion avec redirection
+- Complexité géométrique contrôlée
+
+#### Stage3 - Obstacles Multiples
+**Objectif** : Gestion de configurations complexes
+
+**Caractéristiques** :
+- Plusieurs obstacles avec interactions
+- Patterns de diffusion plus sophistiqués
+- Généralisation des stratégies de contournement
+
+### 2. Système de Visualisation Modulaire
+
+#### ProgressiveVisualizer - Moteur de Visualisation
+**Responsabilité** : Génération automatique de visualisations comparatives par stage
+
+**Fonctionnalités principales** :
+
+##### Visualisation par Stage
+- **Méthode** : `visualize_stage_results(model, stage)`
+- **Génération de séquences de test** : Seed fixe pour reproductibilité
+- **Comparaison cible/prédiction** : Visualisation côte à côte en temps réel
+- **Métriques de convergence** : Graphiques d'évolution de l'erreur MSE
+
+##### Animations Comparatives
+- **Format** : GIF avec comparaison side-by-side
+- **Contenu** : Évolution temporelle cible vs NCA
+- **Annotations** : Obstacles mis en évidence par contours cyan
+- **Paramètres** : Colormap 'hot', normalisation [0,1], 5 FPS
+
+##### Graphiques de Convergence
+- **Métriques** : Erreur MSE temporelle
+- **Visualisation** : Courbe d'évolution avec grille
+- **Sauvegarde** : PNG haute résolution (150 DPI)
+- **Métadonnées** : Seed de génération, numéro d'étape
+
+#### Résumé de Curriculum
+**Méthode** : `create_curriculum_summary()`
+
+**Visualisations globales** :
+- **Progression multi-stages** : Évolution des pertes par étape
+- **Learning rate adaptatif** : Suivi des ajustements par stage
+- **Comparaison inter-stages** : Couleurs distinctives par étape
+- **Échelles logarithmiques** : Meilleure lisibilité des convergences
+
+---
+
+## Spécifications Techniques
+
+### 1. Architecture de Classes
+
+#### Structure Modulaire
 ```
 v11/
-├── config.py           → ModularConfig (paramètres centralisés)
-├── torching.py         → DEVICE (détection CUDA/CPU)
-├── main.py             → Point d'entrée principal
-├── nca_model.py        → ImprovedNCA (réseau neuronal)
-├── updater.py          → OptimizedNCAUpdater (application du modèle)
-├── simulator.py        → HeatDiffusionSimulator (simulation physique)
-├── sequences.py        → OptimizedSequenceCache (cache par étape)
-├── stage_manager.py    → StageManager (orchestration étapes)
-├── trainer.py          → ModularTrainer (logique d'entraînement)
-├── visualizer.py       → ProgressiveVisualizer (génération graphiques)
-└── stages/
-    ├── base_stage.py           → BaseStage (classe abstraite)
-    ├── stage_1_no_obstacle.py  → Stage1NoObstacle
-    ├── stage_2_one_obstacle.py → Stage2OneObstacle
-    └── stage_3_few_obstacles.py→ Stage3FewObstacles
+├── config.py              # Configuration centralisée (vide - en attente)
+├── main.py                # Point d'entrée principal (vide - en attente)
+├── nca_model.py           # Modèle NCA (vide - en attente)
+├── reality_world.py       # Abstraction du monde physique (vide - en attente)
+├── simulation_temporal_sequence.py  # Séquences temporelles (vide - en attente)
+├── stage_manager.py       # Gestionnaire de stages (vide - en attente)
+├── trainer.py             # Moteur d'entraînement (vide - en attente)
+├── torched.py            # Utilitaires PyTorch (vide - en attente)
+├── visualizer.py         # ✅ Système de visualisation modulaire
+└── stages/               # Modules de stages
+    ├── base_stage.py           # Interface abstraite (vide - en attente)
+    ├── stage_1_no_obstacle.py  # Stage 1 (vide - en attente)
+    ├── stage_2_one_obstacle.py # Stage 2 (vide - en attente)
+    └── stage_3_few_obstacles.py # Stage 3 (vide - en attente)
 ```
 
-## Graphe d'Appels - Flux Principal
+#### État Actuel du Développement
+**Module Implémenté** : `visualizer.py`
+- Architecture complète et fonctionnelle
+- Système de visualisation par stages
+- Génération d'animations comparatives
+- Graphiques de convergence et résumés globaux
 
-### 1. Initialisation (main.py)
-```
-main() 
-  ├── torch.manual_seed(CONFIG.SEED)
-  ├── ImprovedNCA() → nca_model.py
-  ├── ModularTrainer(model) → trainer.py
-  ├── trainer.train_full_curriculum()
-  ├── ProgressiveVisualizer() → visualizer.py
-  └── visualizer.visualize_stage_results()
-```
+**Modules en Attente** : Tous les autres fichiers sont vides
+- Architecture définie mais implémentation manquante
+- Structure modulaire préparée pour le développement futur
 
-### 2. Entraînement Modulaire (trainer.py)
-```
-ModularTrainer.train_full_curriculum()
-  └── for stage in STAGE_MANAGER.get_stages():
-      └── _train_stage(stage, CONFIG.NB_EPOCHS_BY_STAGE)
-          ├── sequence_cache.initialize_stage_cache(stage)
-          │   └── simulator.generate_stage_sequence(stage, ...)
-          │       └── stage.generate_environment(size, source_pos)
-          ├── for epoch in range(max_epochs):
-          │   ├── _adjust_learning_rate(stage_nb, epoch_in_stage)
-          │   ├── sequence_cache.get_stage_batch(stage, 1)
-          │   └── _train_step(target_seq, source_mask, obstacle_mask)
-          │       └── updater.step(grid_pred, source_mask, obstacle_mask)
-          │           └── model(valid_patches)
-          └── stage.save_stage_checkpoint(model_state, optimizer_state)
-```
+### 2. Dépendances et Configuration
 
-### 3. Génération des Stages (stages/)
-```
-STAGE_MANAGER.get_stages()
-  ├── Stage1NoObstacle.generate_environment() → torch.zeros()
-  ├── Stage2OneObstacle.generate_environment() → Un obstacle
-  └── Stage3FewObstacles.generate_environment() → Obstacles multiples
-      └── _validate_connectivity() → Flood-fill algorithm
-```
+#### Dépendances PyTorch
+- **torch** : Tenseurs et opérations GPU/CPU
+- **torch.no_grad()** : Optimisation mémoire pour les visualisations
+- **Gestion des devices** : Support CPU/GPU transparent
 
-### 4. Simulation Physique (simulator.py)
-```
-HeatDiffusionSimulator.generate_stage_sequence()
-  ├── stage.generate_environment(size, source_pos)
-  ├── Initialisation: grid[i0, j0] = SOURCE_INTENSITY
-  └── for _ in range(n_steps):
-      └── step(grid, source_mask, obstacle_mask)
-          └── F.conv2d(x, kernel, padding=1) # Diffusion 3x3
-```
+#### Dépendances Visualisation
+- **matplotlib.pyplot** : Génération de graphiques
+- **matplotlib.animation** : Création d'animations GIF
+- **numpy** : Opérations matricielles pour les métriques
 
-### 5. Cache et Optimisations (sequences.py)
-```
-OptimizedSequenceCache
-  ├── initialize_stage_cache(stage)
-  │   └── for i in range(STAGE_CACHE_SIZE):
-  │       └── simulator.generate_stage_sequence()
-  ├── get_stage_batch(stage, batch_size)
-  └── clear_stage_cache(stage_nb) # Libération mémoire
-```
+#### Configuration Système
+- **CONFIG** : Objet de configuration centralisé (importé mais non défini)
+- **Graines aléatoires** : Reproductibilité avec seeds fixes
+- **Chemins de sortie** : Structure de dossiers automatique par stage
 
-### 6. Visualisation (visualizer.py)
-```
-ProgressiveVisualizer
-  ├── visualize_stage_results(model, stage)
-  │   ├── simulator.generate_stage_sequence()
-  │   ├── OptimizedNCAUpdater.step() # Prédiction NCA
-  │   ├── _create_stage_animations()
-  │   └── _create_stage_convergence_plot()
-  └── create_curriculum_summary()
-      ├── _plot_curriculum_progression()
-      └── _plot_stage_comparison()
-```
+### 3. Flux de Données et Sécurité Mémoire
 
-## Détail des Modules
+#### Gestion des Tenseurs
+**Principe** : Sécurité maximale avec `.detach().cpu().numpy()`
+- **Détachement** : Suppression des gradients pour les visualisations
+- **Migration CPU** : Conversion automatique pour matplotlib
+- **Copie sécurisée** : `.clone()` pour éviter les références partagées
 
-### 1. Configuration (config.py)
-**Responsabilité**: Paramètres centralisés du système
-```python
-class ModularConfig:
-    SEED = 3333
-    NB_EPOCHS_BY_STAGE = 30
-    TOTAL_EPOCHS = 90  # 3 * 30
-    GRID_SIZE = 16
-    LEARNING_RATE = 1e-3
-    BATCH_SIZE = 4
-    STAGE_CACHE_SIZE = 250
-```
+#### Modes d'Exécution
+**Entraînement vs Évaluation** :
+- `model.eval()` : Mode évaluation pour les visualisations
+- `model.train()` : Retour en mode entraînement après visualisation
+- `torch.no_grad()` : Contexte sans gradient pour l'efficacité
 
-### 2. Modèle NCA (nca_model.py)
-**Responsabilité**: Architecture du réseau neuronal
-```python
-class ImprovedNCA(nn.Module):
-    - input_size: 11 (patch 3x3 + source + obstacle)
-    - Architecture: Linear + BatchNorm + ReLU + Dropout
-    - Sortie: delta * 0.1 (scaling pour stabilité)
-```
+---
 
-### 3. Updater (updater.py)
-**Responsabilité**: Application optimisée du modèle NCA
-```python
-class OptimizedNCAUpdater:
-    - Extraction vectorisée des patches 3x3
-    - Application seulement sur positions valides
-    - Contraintes: obstacles = 0, sources = constantes
-```
+## Spécifications de Développement Futur
 
-### 4. Simulateur (simulator.py)
-**Responsabilité**: Simulation physique de référence
-```python
-class HeatDiffusionSimulator:
-    - Noyau de convolution 3x3 pour diffusion
-    - Génération de séquences par stage
-    - Gestion automatique des contraintes
-```
+### 1. Modules à Implémenter
 
-### 5. Gestionnaire de Stages (stage_manager.py)
-**Responsabilité**: Orchestration des étapes d'apprentissage
-```python
-class StageManager:
-    - Liste des stages: [Stage1, Stage2, Stage3]
-    - Attribution automatique des numéros de stage
-    - Interface unifiée: get_stages(), get_stage(nb)
-```
+#### Configuration Centralisée (config.py)
+**Objectif** : Point unique de configuration pour tous les modules
 
-### 6. Stages Individuels (stages/)
-**Responsabilité**: Définition des environnements par étape
+**Paramètres attendus** :
+- `VISUALIZATION_SEED` : Graine pour reproductibilité
+- `POSTVIS_STEPS` : Nombre de pas pour visualisations
+- `GRID_SIZE` : Taille de la grille de simulation
+- `SOURCE_INTENSITY` : Intensité des sources thermiques
+- `OUTPUT_DIR` : Répertoire de sauvegarde
+- `NB_EPOCHS_BY_STAGE` : Épochs par stage
 
-#### BaseStage (base_stage.py)
-```python
-class BaseStage(ABC):
-    - Métriques: epochs_trained, loss_history, stage_lrs
-    - Sauvegarde: checkpoints + métriques JSON
-    - Interface: generate_environment() [abstraite]
-```
+#### Modèle NCA (nca_model.py)
+**Responsabilité** : Implémentation du Neural Cellular Automaton
 
-#### Stage1NoObstacle
-```python
-- Environnement: torch.zeros() (pas d'obstacles)
-- Objectif: Apprentissage de la diffusion de base
-```
+**Interface attendue** :
+- `step(grid, source_mask, obstacle_mask)` : Évolution d'un pas de temps
+- `eval()/train()` : Gestion des modes d'exécution
+- Support des masques de contraintes
 
-#### Stage2OneObstacle
-```python
-- Environnement: Un obstacle de taille aléatoire
-- Contraintes: Évitement de la source, placement valide
-```
+#### Gestionnaire de Stages (stage_manager.py)
+**Responsabilité** : Orchestration des stages modulaires
 
-#### Stage3FewObstacles
-```python
-- Environnement: 2-4 obstacles multiples
-- Validation: Algorithme de connectivité (flood-fill)
-- Contrainte: 50% minimum de connectivité
-```
+**Fonctionnalités** :
+- `STAGE_MANAGER.get_stages()` : Accès aux stages configurés
+- Système de registre extensible
+- Gestion des séquences d'entraînement
 
-### 7. Cache de Séquences (sequences.py)
-**Responsabilité**: Optimisation mémoire et performance
-```python
-class OptimizedSequenceCache:
-    - Cache séparé par stage (250 séquences/stage)
-    - Libération automatique des stages précédents
-    - Mélange périodique pour diversité
-```
+### 2. Intégration avec l'Architecture Existante
 
-### 8. Entraîneur (trainer.py)
-**Responsabilité**: Logique d'entraînement modulaire
-```python
-class ModularTrainer:
-    - Learning rate adaptatif: 1.0 → 0.6 linéaire par stage
-    - Décroissance cosine intra-stage
-    - Gradient clipping (max_norm=1.0)
-    - Sauvegarde automatique des checkpoints
-```
+#### Continuité avec v10
+**Héritage conceptuel** :
+- Architecture modulaire basée sur BaseStage
+- Système de registre de stages extensible
+- Configuration découplée par stage
 
-### 9. Visualiseur (visualizer.py)
-**Responsabilité**: Génération des graphiques et animations
-```python
-class ProgressiveVisualizer:
-    - Animations GIF de comparaison par stage
-    - Graphiques de convergence
-    - Résumé global du curriculum
-    - Métriques de performance
-```
+**Évolutions v11** :
+- Simplification de l'architecture
+- Focus sur la visualisation modulaire
+- Préparation pour développements futurs
 
-## Flux de Données
+#### Points d'Extension
+**Nouveaux stages** :
+- Héritage de BaseStage
+- Implémentation des méthodes abstraites
+- Intégration automatique dans les visualisations
 
-### 1. Séquence d'Entraînement
-```
-Stage → Environment → Simulator → Target Sequence
-  ↓
-Cache → Batch → Trainer → Model → Prediction
-  ↓
-Loss → Optimizer → Model Update
-```
+**Nouveaux types de visualisation** :
+- Extension de ProgressiveVisualizer
+- Nouveaux formats de sortie
+- Métriques personnalisées
 
-### 2. Gestion Mémoire
-```
-Stage N: Initialize Cache (250 sequences)
-  ↓
-Stage N: Training Loop
-  ↓
-Stage N+1: Clear Cache N, Initialize Cache N+1
-```
+---
 
-### 3. Learning Rate Dynamique
-```
-base_lr = 1e-3
-stage_multiplier = 1.0 - ((stage_nb-1) / (n_stages-1)) * 0.4
-cosine_factor = 0.5 * (1 + cos(π * epoch / epochs_per_stage))
-final_lr = base_lr * stage_multiplier * (0.1 + 0.9 * cosine_factor)
-```
+## Contraintes et Limitations
 
-## Points d'Extension
+### 1. État de Développement
+**Limitation majeure** : Architecture partiellement implémentée
+- Seul le module de visualisation est fonctionnel
+- Dépendances sur des modules non implémentés
+- Configuration centralisée manquante
 
-### 1. Ajout de Nouveaux Stages
-```python
-# 1. Créer stage_4_complex_obstacles.py
-class Stage4ComplexObstacles(BaseStage):
-    def generate_environment(self, size, source_pos):
-        # Implémentation spécifique
-        
-# 2. Ajouter dans stage_manager.py
-self._stages = [Stage1(), Stage2(), Stage3(), Stage4()]
-```
+### 2. Dépendances d'Implémentation
+**Modules requis pour fonctionnement complet** :
+- CONFIG avec paramètres complets
+- NCA avec interface `step()`
+- STAGE_MANAGER avec accès aux stages
+- BaseStage avec méthodes de génération
 
-### 2. Nouveaux Types de Visualisation
-```python
-# Dans visualizer.py
-def create_3d_visualization(self, vis_data):
-    # Visualisation 3D des gradients
-    
-def create_flow_field_analysis(self, vis_data):
-    # Analyse des champs de flux
-```
+### 3. Sécurité et Robustesse
+**Gestion d'erreurs** : Selon les instructions, pas de code de fallback
+- Échec immédiat avec exceptions claires
+- Validation stricte des entrées
+- Gestion propre des ressources mémoire
 
-### 3. Optimisations Supplémentaires
-```python
-# Cache intelligent avec LRU
-# Parallélisation des stages
-# Mixed precision training
-# Distributed training
-```
+---
 
-## Métriques et Monitoring
+## Conclusion
 
-### 1. Métriques par Stage
-- **Loss history**: Évolution de la perte MSE
-- **Learning rates**: Historique des LR adaptatifs
-- **Epochs trained**: Nombre d'époques utilisées
-- **Convergence**: Temps de convergence par stage
+La version v11 représente une **transition architecturale** vers un système modulaire épuré avec un focus sur la visualisation avancée. Bien que l'implémentation soit actuellement partielle, l'architecture définie permet un développement futur cohérent et extensible.
 
-### 2. Métriques Globales
-- **Temps total**: Durée d'entraînement complète
-- **Mémoire**: Utilisation GPU/CPU par stage
-- **Stabilité**: Variance des performances
+**Points forts** :
+- Architecture de visualisation complète et robuste
+- Séparation claire des responsabilités
+- Extensibilité préparée pour nouveaux stages
+- Gestion sécurisée de la mémoire GPU/CPU
 
-### 3. Visualisations Générées
-- **Animations**: GIFs de comparaison cible/prédiction
-- **Convergence**: Graphiques d'erreur temporelle
-- **Curriculum**: Progression globale multi-stage
-- **Performance**: Comparaisons inter-stages
+**Développements prioritaires** :
+- Configuration centralisée (config.py)
+- Modèle NCA avec interface standardisée
+- Gestionnaire de stages modulaire
+- Implémentation des stages de base
 
-## État Actuel vs Prochaines Refactorisations
-
-### ✅ Réalisé en v11
-- Découplage complet des modules
-- Architecture orientée objet claire
-- Système de stages extensible
-- Cache optimisé par étape
-- Visualisations avancées
-- Learning rate adaptatif dynamique
-
-### 🎯 Prochaines Améliorations Possibles
-- **Scheduler avancé**: Transitions adaptatives entre stages
-- **Métriques temps réel**: Dashboard de monitoring
-- **Parallélisation**: Entraînement multi-GPU
-- **Validation**: Tests unitaires pour chaque module
-- **Documentation**: API docs complète
-- **Configuration**: YAML/JSON externe pour les paramètres
-
-## Contraintes Techniques
-
-### 1. Mémoire
-- Cache limité à 250 séquences/stage
-- Libération automatique des stages précédents
-- Utilisation de `.detach().cpu()` pour les visualisations
-
-### 2. Performance
-- Extraction vectorisée des patches (unfold)
-- Application seulement sur positions valides
-- Gradient clipping pour stabilité numérique
-
-### 3. Reproductibilité
-- Seeds fixes: CONFIG.SEED (entraînement), VISUALIZATION_SEED (visualisation)
-- Deterministic operations sur GPU si disponible
-
-Cette architecture v11 représente un système robuste et extensible pour l'apprentissage modulaire progressif des NCA, avec une séparation claire des responsabilités et des interfaces bien définies pour les futures extensions.
+Cette architecture modulaire offre une base solide pour l'évolution future du système tout en maintenant la flexibilité et la maintenabilité du code.

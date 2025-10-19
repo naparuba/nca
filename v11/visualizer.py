@@ -39,15 +39,15 @@ class ProgressiveVisualizer:
         torch.manual_seed(CONFIG.VISUALIZATION_SEED)
         np.random.seed(CONFIG.VISUALIZATION_SEED)
         
-        reality_sequence = stage.generate_simulation_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
+        simulation_temporal_sequence = stage.generate_simulation_temporal_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
         
         # Prédiction du modèle
         model.eval()
         
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
-        reality_worlds = reality_sequence.get_reality_worlds()
-        source_mask = reality_sequence.get_source_mask()
-        obstacle_mask = reality_sequence.get_obstacle_mask()
+        reality_worlds = simulation_temporal_sequence.get_reality_worlds()
+        source_mask = simulation_temporal_sequence.get_source_mask()
+        obstacle_mask = simulation_temporal_sequence.get_obstacle_mask()
         
         nca_sequence = []
         grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
@@ -61,12 +61,12 @@ class ProgressiveVisualizer:
         
         # Création des visualisations avec .detach() pour sécurité
         vis_data = {
-            'stage_nb':        stage_nb,
-            'target_sequence': [t.get_as_tensor().detach().cpu().numpy() for t in reality_worlds],
-            'nca_sequence':    [t.detach().cpu().numpy() for t in nca_sequence],
-            'source_mask':     source_mask.detach().cpu().numpy(),
-            'obstacle_mask':   obstacle_mask.detach().cpu().numpy(),
-            'vis_seed':        CONFIG.VISUALIZATION_SEED,
+            'stage_nb':       stage_nb,
+            'reality_worlds': [t.get_as_tensor().detach().cpu().numpy() for t in reality_worlds],
+            'nca_sequence':   [t.detach().cpu().numpy() for t in nca_sequence],
+            'source_mask':    source_mask.detach().cpu().numpy(),
+            'obstacle_mask':  obstacle_mask.detach().cpu().numpy(),
+            'vis_seed':       CONFIG.VISUALIZATION_SEED,
         }
         
         # Sauvegarde des animations
@@ -86,7 +86,7 @@ class ProgressiveVisualizer:
         
         # Animation comparative
         self._save_comparison_gif(
-                vis_data['target_sequence'],
+                vis_data['reality_worlds'],
                 vis_data['nca_sequence'],
                 vis_data['obstacle_mask'],
                 stage_dir / f"animation_comparaison_étape_{stage_nb}.gif"
@@ -95,20 +95,20 @@ class ProgressiveVisualizer:
         print(f"✅ Animations étape {stage_nb} sauvegardées dans {stage_dir}")
     
     
+    # Crée le graphique de convergence pour une étape
     @staticmethod
     def _create_stage_convergence_plot(vis_data):
         # type: (Dict[str, Any]) -> None
-        """Crée le graphique de convergence pour une étape."""
         stage_nb = vis_data['stage_nb']
         stage_dir = Path(CONFIG.OUTPUT_DIR) / f"stage_{stage_nb}"
         
-        target_seq = vis_data['target_sequence']
+        reality_worlds = vis_data['reality_worlds']
         nca_seq = vis_data['nca_sequence']
         
         # Calcul de l'erreur temporelle
         errors = []
-        for t in range(min(len(target_seq), len(nca_seq))):
-            error = np.mean((target_seq[t] - nca_seq[t]) ** 2)
+        for t in range(min(len(reality_worlds), len(nca_seq))):
+            error = np.mean((reality_worlds[t] - nca_seq[t]) ** 2)
             errors.append(error)
         
         # Graphique

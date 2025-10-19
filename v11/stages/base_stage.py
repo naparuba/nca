@@ -27,8 +27,8 @@ class BaseStage(ABC):
         self._metrics_stage_lrs = []
         
         # CACHE
-        self._reality_sequences_for_training = []  # type: List[SimulationTemporalSequence]
-        self._reality_sequences_for_training_current_indices = 0
+        self._reality_temporal_sequences_for_training = []  # type: List[SimulationTemporalSequence]
+        self._reality_temporal_sequences_for_training_current_indices = 0
         
         # step player
         self._kernel_avg_3x3 = torch.ones((1, 1, 3, 3), device=CONFIG.DEVICE) / 9.0  # Average 3x3
@@ -133,13 +133,13 @@ class BaseStage(ABC):
         # type: (BaseStage) -> SimulationTemporalSequence
         """Récupère un échantillon pour l'étape spécifiée."""
         stage_nb = self.get_stage_nb()
-        if not self._reality_sequences_for_training:
+        if not self._reality_temporal_sequences_for_training:
             raise Exception("Le cache de séquences n'a pas été généré pour l'étape {stage_nb}.")
         
         # Récupère l'échantillon courant et avance l'index
-        sequence = self._reality_sequences_for_training[self._reality_sequences_for_training_current_indices]  # type: SimulationTemporalSequence
-        self._reality_sequences_for_training_current_indices = (self._reality_sequences_for_training_current_indices + 1) % len(
-                self._reality_sequences_for_training)
+        sequence = self._reality_temporal_sequences_for_training[self._reality_temporal_sequences_for_training_current_indices]  # type: SimulationTemporalSequence
+        self._reality_temporal_sequences_for_training_current_indices = (self._reality_temporal_sequences_for_training_current_indices + 1) % len(
+                self._reality_temporal_sequences_for_training)
         
         return sequence
     
@@ -153,14 +153,14 @@ class BaseStage(ABC):
             if i % 50 == 0:
                 print(f"\r   Étape {self.get_stage_nb()}: {i}/{cache_size}                                 ", end='', flush=True)
             
-            target_sequence = self.generate_simulation_sequence(n_steps=CONFIG.NCA_STEPS, size=CONFIG.GRID_SIZE)
+            simulation_temporal_sequence = self.generate_simulation_temporal_sequence(n_steps=CONFIG.NCA_STEPS, size=CONFIG.GRID_SIZE)
             
-            self._reality_sequences_for_training.append(target_sequence)
+            self._reality_temporal_sequences_for_training.append(simulation_temporal_sequence)
         
         print(f"\r✅ Cache étape {self.get_stage_nb()} créé ({cache_size} séquences)")
     
     
-    def generate_simulation_sequence(self, n_steps, size):
+    def generate_simulation_temporal_sequence(self, n_steps, size):
         # type: (int, int) -> SimulationTemporalSequence
         """
         Génère une séquence adaptée à l'étape d'apprentissage courante.
