@@ -58,7 +58,7 @@ class Trainer:
         # Déroulement temporel
         for t_step in range(CONFIG.NCA_STEPS):
             target = reality_worlds[t_step + 1].get_as_tensor()
-            grid_pred = self._model.step(grid_pred, source_mask, obstacle_mask)
+            grid_pred = self._model.run_step(grid_pred, source_mask, obstacle_mask)
             
             # Perte pondérée selon l'étape
             step_loss = self._loss_fn(grid_pred, target)

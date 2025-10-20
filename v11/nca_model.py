@@ -10,10 +10,11 @@ from config import CONFIG
 # =============================================================================
 class NCA(nn.Module):
     
-    def __init__(self, input_size):
-        # type: (int) -> None
+    def __init__(self):
+        # type: () -> None
         super().__init__()
         
+        input_size = 11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
         self.input_size = input_size
         self.hidden_size = CONFIG.HIDDEN_SIZE
         self.n_layers = CONFIG.N_LAYERS
@@ -44,9 +45,9 @@ class NCA(nn.Module):
         return delta * self.delta_scale
     
     
-    def step(self, grid, source_mask, obstacle_mask):
+    def run_step(self, grid, source_mask, obstacle_mask):
         # type: (torch.Tensor, torch.Tensor, torch.Tensor) -> torch.Tensor
-        """Application optimisée du NCA."""
+        
         H, W = grid.shape
         
         # Extraction vectorisée des patches 3x3
@@ -59,21 +60,30 @@ class NCA(nn.Module):
         obstacle_flat = obstacle_mask.flatten().float().unsqueeze(1)  # [H*W, 1]
         full_patches = torch.cat([patches, source_flat, obstacle_flat], dim=1)  # [H*W, 11]
         
-        # Application seulement sur positions valides
-        valid_mask = ~obstacle_mask.flatten()
+        # # Application seulement sur positions valides
+        # valid_mask = ~obstacle_mask.flatten()
+        #
+        # valid_patches = full_patches[valid_mask]
+        # deltas = self(valid_patches)
+        #
+        # new_grid = grid.clone().flatten()
+        # new_grid[valid_mask] += deltas.squeeze()
+        # new_grid = torch.clamp(new_grid, 0.0, 1.0).reshape(H, W)
+        #
+        #
+        # # Contraintes finales
+        # new_grid[obstacle_mask] = 0.0
+        # new_grid[source_mask] = grid[source_mask]
         
-        if valid_mask.any():
-            valid_patches = full_patches[valid_mask]
-            deltas = self(valid_patches)
-            
-            new_grid = grid.clone().flatten()
-            new_grid[valid_mask] += deltas.squeeze()
-            new_grid = torch.clamp(new_grid, 0.0, 1.0).reshape(H, W)
-        else:
-            new_grid = grid.clone()
+        deltas = self(full_patches)
         
-        # Contraintes finales
-        new_grid[obstacle_mask] = 0.0
+        new_grid = grid.clone().flatten()
+        # Appliquer les deltas partout
+        new_grid += deltas.squeeze()
+        new_grid = torch.clamp(new_grid, 0.0, 1.0).reshape(H, W)
+        
+        # On garde les sources
         new_grid[source_mask] = grid[source_mask]
+        new_grid[obstacle_mask] = 0.0
         
         return new_grid

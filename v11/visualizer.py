@@ -50,7 +50,7 @@ class ProgressiveVisualizer:
         
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
             for _ in range(CONFIG.POSTVIS_STEPS):
-                world_nca_prediction = model.step(world_nca_prediction, source_mask, obstacle_mask)
+                world_nca_prediction = model.run_step(world_nca_prediction, source_mask, obstacle_mask)
                 nca_temporal_sequence.append(world_nca_prediction.clone())
         
         # .detach() pour sécurité
@@ -70,7 +70,7 @@ class ProgressiveVisualizer:
     
     def _create_stage_animations(self, vis_data):
         # type: (Dict[str, Any]) -> None
-        """Crée les animations GIF pour une étape."""
+        
         stage_nb = vis_data['stage_nb']
         stage_dir = Path(CONFIG.OUTPUT_DIR) / f"stage_{stage_nb}"
         stage_dir.mkdir(parents=True, exist_ok=True)

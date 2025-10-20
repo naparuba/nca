@@ -42,8 +42,7 @@ def main():
     try:
         # Initialisation du modèle
         print("\n🔧 Initialisation du modèle...")
-        model = NCA(input_size=11,  # 9 (patch 3x3) + 1 (source) + 1 (obstacle)
-                    ).to(DEVICE)
+        model = NCA().to(DEVICE)
         
         print(f"📊 Nombre de paramètres dans le modèle: {sum(p.numel() for p in model.parameters()):,}")
         
