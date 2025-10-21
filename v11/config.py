@@ -14,13 +14,14 @@ class ModularConfig:
         
         self.VISUALIZATION_SEED = 3333
         
-        self.NB_EPOCHS_BY_STAGE = 200
+        self.NB_EPOCHS_BY_STAGE = 50  # 200
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
         
         # Paramètres de grille
         self.GRID_SIZE = 16
         self.SOURCE_INTENSITY = 1.0
+        self.OBSTACLE_FULL_BLOCK_VALUE = 1.0
         
         # Paramètres d'entraînement modulaire
         self.NCA_STEPS = 20
@@ -44,10 +45,6 @@ class ModularConfig:
         
         # STAGE CACHE SIZES
         self.STAGE_CACHE_SIZE = 250
-        
-        # Pénalité pour l'apprentissage des contraintes d'obstacles
-        # Plus ce poids est élevé, plus le modèle est incité à maintenir les obstacles à 0
-        self.OBSTACLE_PENALTY_WEIGHT = 50.0
         
         self.DEVICE = DEVICE
 

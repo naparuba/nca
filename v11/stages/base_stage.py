@@ -11,6 +11,13 @@ from torch.nn import functional as F
 from reality_world import RealityWorld
 
 
+class REALITY_LAYER:
+    TEMPERATURE = 0
+    OBSTACLE = 1
+
+ALL_REALITY_LAYERS = [REALITY_LAYER.TEMPERATURE, REALITY_LAYER.OBSTACLE]
+
+
 class BaseStage(ABC):
     NAME = 'UNSET'
     DISPLAY_NAME = 'Étape non définie'
@@ -182,10 +189,13 @@ class BaseStage(ABC):
         obstacle_mask = self.generate_obstacles(size, (i0, j0))
         
         # Initialisation
-        grid = torch.zeros((size, size), device=CONFIG.DEVICE)
-        grid[i0, j0] = CONFIG.SOURCE_INTENSITY
+        grid = torch.zeros((len(ALL_REALITY_LAYERS), size, size), device=CONFIG.DEVICE)  # 2 layers: temperature, obstacle sur grille 16x16
+        grid[REALITY_LAYER.TEMPERATURE, i0, j0] = CONFIG.SOURCE_INTENSITY  # force la source dans la chaleur
+        # et on set les obstacles
+        grid[REALITY_LAYER.OBSTACLE, obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE
+        # ou grid[REALITY_LAYER.OBSTACLE, :, :] = obstacle_mask.float() ?
         
-        source_mask = torch.zeros_like(grid, dtype=torch.bool)
+        source_mask = torch.zeros_like(grid[REALITY_LAYER.TEMPERATURE], dtype=torch.bool)
         source_mask[i0, j0] = True
         
         # S'assurer que la source n'est pas dans un obstacle
@@ -206,10 +216,23 @@ class BaseStage(ABC):
     def _play_diffusion_step(self, grid, source_mask, obstacle_mask):
         # type: (torch.Tensor, torch.Tensor, torch.Tensor) -> torch.Tensor
         
-        x = grid.unsqueeze(0).unsqueeze(0)
-        new_grid = F.conv2d(x, self._kernel_avg_3x3, padding=1).squeeze(0).squeeze(0)
+        # On applique la diffusion uniquement sur la couche température
+        x = grid[REALITY_LAYER.TEMPERATURE].unsqueeze(0).unsqueeze(0)  # Que la couche de température, shape (1, 1, H, W)
+        new_grid_heat = F.conv2d(x, self._kernel_avg_3x3, padding=1).squeeze()
         
-        new_grid[obstacle_mask] = 0.0  # No diffusion on obstacles
-        new_grid[source_mask] = grid[source_mask]  # Keep source intensity
+        # On clone la grille complète pour créer le nouvel état
+        new_grid = grid.clone()
+        
+        # On met à jour la couche température avec la diffusion
+        new_grid[REALITY_LAYER.TEMPERATURE] = new_grid_heat
+        
+        # IMPORTANT : On force la source à conserver son intensité (contrainte physique stricte)
+        # Sans cela, la source s'atténue progressivement avec la diffusion
+        new_grid[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY
+        
+        # Les obstacles restent à 0 dans la couche température (pas de chaleur dans les obstacles)
+        new_grid[REALITY_LAYER.TEMPERATURE][obstacle_mask] = 0.0
+        
+        # La couche obstacles (REALITY_LAYER.OBSTACLE) reste inchangée (les obstacles ne bougent pas)
         
         return new_grid

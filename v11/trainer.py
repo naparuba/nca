@@ -7,6 +7,7 @@ import torch
 
 from config import CONFIG, DEVICE
 from stage_manager import STAGE_MANAGER
+from stages.base_stage import REALITY_LAYER
 from torched import AdamW, get_MSELoss
 
 if TYPE_CHECKING:
@@ -54,42 +55,42 @@ class Trainer:
         
         # Initialisation
         grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
-        grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
+        grid_pred[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY  # Set Les sources
+        grid_pred[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # Set Les obstacles
         
         total_loss = torch.tensor(0.0, device=DEVICE)
-        total_obstacle_penalty = torch.tensor(0.0, device=DEVICE)
         
         # Déroulement temporel
         for t_step in range(CONFIG.NCA_STEPS):
             target = reality_worlds[t_step + 1].get_as_tensor()
-            grid_pred = self._model.run_step(grid_pred, source_mask, obstacle_mask)
+            grid_pred = self._model.run_step(grid_pred, source_mask)
             
-            # Perte standard sur la prédiction globale
+            # Perte standard sur la prédiction globale de la température
             step_loss = self._loss_fn(grid_pred, target)
             
-            # Pénalité forte pour toute modification des obstacles
-            # Le modèle doit apprendre à maintenir les obstacles à 0
-            obstacle_values = grid_pred[obstacle_mask]
-            target_obstacle_values = torch.zeros_like(obstacle_values)
-            obstacle_penalty = self._loss_fn(obstacle_values, target_obstacle_values) * CONFIG.OBSTACLE_PENALTY_WEIGHT
-            
             total_loss = total_loss + step_loss
-            total_obstacle_penalty = total_obstacle_penalty + obstacle_penalty
         
         avg_loss = total_loss / CONFIG.NCA_STEPS
-        avg_obstacle_penalty = total_obstacle_penalty / CONFIG.NCA_STEPS
         
-        # Perte totale combinée
-        combined_loss = avg_loss + avg_obstacle_penalty
+        # combined_loss = avg_loss
+        combined_loss_float = avg_loss.item()
+        
+        # print(f' avg_loss: {avg_loss.item():.6f}, '
+        #        f' obstacle_penalty: {avg_obstacle_penalty.item():.6f}, '
+        #        f' cold_zone_penalty: {avg_cold_zone_penalty.item():.6f}, '
+        #        f' combined_loss: {combined_loss_float:.6f}')
         
         # Backpropagation avec clipping
-        combined_loss.backward()
+        avg_loss.backward()
         torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=1.0)
         
         self._optimizer.step()
         
+        if combined_loss_float == float('nan'):
+            raise ValueError("NaN loss encountered during training step.")
+        
         # On retourne la perte combinée pour le monitoring
-        return combined_loss.item()
+        return combined_loss_float
     
     
     def _adjust_learning_rate(self, stage_nb, epoch_in_stage):

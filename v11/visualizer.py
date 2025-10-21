@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 from config import CONFIG
 from nca_model import NCA
 from stage_manager import STAGE_MANAGER
+from stages.base_stage import REALITY_LAYER
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
@@ -45,12 +46,14 @@ class ProgressiveVisualizer:
         
         nca_temporal_sequence = []
         world_nca_prediction = torch.zeros_like(reality_worlds[0].get_as_tensor())  # start with the same start as reality
-        world_nca_prediction[source_mask] = CONFIG.SOURCE_INTENSITY
+        # On accède à la couche température (REALITY_LAYER.TEMPERATURE = 0) avant d'appliquer le masque
+        world_nca_prediction[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY
+        world_nca_prediction[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # configure the obstacles
         nca_temporal_sequence.append(world_nca_prediction.clone())
         
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
             for _ in range(CONFIG.POSTVIS_STEPS):
-                world_nca_prediction = model.run_step(world_nca_prediction, source_mask, obstacle_mask)
+                world_nca_prediction = model.run_step(world_nca_prediction, source_mask)  # , obstacle_mask)
                 nca_temporal_sequence.append(world_nca_prediction.clone())
         
         # .detach() pour sécurité
@@ -58,7 +61,6 @@ class ProgressiveVisualizer:
             'stage_nb':              stage_nb,
             'reality_worlds':        [t.get_as_tensor().detach().cpu().numpy() for t in reality_worlds],
             'nca_temporal_sequence': [t.detach().cpu().numpy() for t in nca_temporal_sequence],
-            'obstacle_mask':         obstacle_mask.detach().cpu().numpy(),
         }
         
         # Sauvegarde des animations
@@ -79,7 +81,6 @@ class ProgressiveVisualizer:
         self._save_comparison_gif(
                 vis_data['reality_worlds'],
                 vis_data['nca_temporal_sequence'],
-                vis_data['obstacle_mask'],
                 stage_dir / f"animation_comparaison_étape_{stage_nb}.gif"
         )
         
@@ -87,7 +88,7 @@ class ProgressiveVisualizer:
     
     
     @staticmethod
-    def _save_comparison_gif(reality_worlds, nca_temporal_sequence, obstacle_mask, filepath):
+    def _save_comparison_gif(reality_worlds, nca_temporal_sequence, filepath):
         # type: (List[np.ndarray], List[np.ndarray], np.ndarray, Path) -> None
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
@@ -97,16 +98,16 @@ class ProgressiveVisualizer:
             ax1.clear()
             ax2.clear()
             
-            # Cible
-            im1 = ax1.imshow(reality_worlds[frame], cmap='hot', vmin=0, vmax=1)
-            ax1.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
+            # Cible - On affiche uniquement la couche température (REALITY_LAYER.TEMPERATURE = 0)
+            im1 = ax1.imshow(reality_worlds[frame][REALITY_LAYER.TEMPERATURE], cmap='hot', vmin=0, vmax=1)
+            ax1.contour(reality_worlds[frame][REALITY_LAYER.OBSTACLE], levels=[0.5], colors='cyan', linewidths=2)
             ax1.set_title(f'Cible - t={frame}')
             ax1.set_xticks([])
             ax1.set_yticks([])
             
-            # NCA
-            im2 = ax2.imshow(nca_temporal_sequence[frame], cmap='hot', vmin=0, vmax=1)
-            ax2.contour(obstacle_mask, levels=[0.5], colors='cyan', linewidths=2)
+            # NCA - On affiche uniquement la couche température (REALITY_LAYER.TEMPERATURE = 0)
+            im2 = ax2.imshow(nca_temporal_sequence[frame][REALITY_LAYER.TEMPERATURE], cmap='hot', vmin=0, vmax=1)
+            ax2.contour(nca_temporal_sequence[frame][REALITY_LAYER.OBSTACLE], levels=[0.5], colors='cyan', linewidths=2)
             ax2.set_title(f'NCA - t={frame}')
             ax2.set_xticks([])
             ax2.set_yticks([])
