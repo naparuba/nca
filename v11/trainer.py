@@ -36,6 +36,9 @@ class Trainer:
         
         """
         Un pas d'entraînement adapté à l'étape courante.
+        
+        Le modèle apprend à respecter les contraintes des obstacles via une pénalité forte
+        dans la fonction de perte, plutôt que par forçage explicite après prédiction.
 
         Args:
             sequence: Sequence d'entraînement
@@ -54,25 +57,39 @@ class Trainer:
         grid_pred[source_mask] = CONFIG.SOURCE_INTENSITY
         
         total_loss = torch.tensor(0.0, device=DEVICE)
+        total_obstacle_penalty = torch.tensor(0.0, device=DEVICE)
         
         # Déroulement temporel
         for t_step in range(CONFIG.NCA_STEPS):
             target = reality_worlds[t_step + 1].get_as_tensor()
             grid_pred = self._model.run_step(grid_pred, source_mask, obstacle_mask)
             
-            # Perte pondérée selon l'étape
+            # Perte standard sur la prédiction globale
             step_loss = self._loss_fn(grid_pred, target)
             
+            # Pénalité forte pour toute modification des obstacles
+            # Le modèle doit apprendre à maintenir les obstacles à 0
+            obstacle_values = grid_pred[obstacle_mask]
+            target_obstacle_values = torch.zeros_like(obstacle_values)
+            obstacle_penalty = self._loss_fn(obstacle_values, target_obstacle_values) * CONFIG.OBSTACLE_PENALTY_WEIGHT
+            
             total_loss = total_loss + step_loss
+            total_obstacle_penalty = total_obstacle_penalty + obstacle_penalty
         
         avg_loss = total_loss / CONFIG.NCA_STEPS
+        avg_obstacle_penalty = total_obstacle_penalty / CONFIG.NCA_STEPS
+        
+        # Perte totale combinée
+        combined_loss = avg_loss + avg_obstacle_penalty
         
         # Backpropagation avec clipping
-        avg_loss.backward()
+        combined_loss.backward()
         torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=1.0)
         
         self._optimizer.step()
-        return avg_loss.item()
+        
+        # On retourne la perte combinée pour le monitoring
+        return combined_loss.item()
     
     
     def _adjust_learning_rate(self, stage_nb, epoch_in_stage):

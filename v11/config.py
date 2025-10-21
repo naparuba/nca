@@ -45,6 +45,10 @@ class ModularConfig:
         # STAGE CACHE SIZES
         self.STAGE_CACHE_SIZE = 250
         
+        # Pénalité pour l'apprentissage des contraintes d'obstacles
+        # Plus ce poids est élevé, plus le modèle est incité à maintenir les obstacles à 0
+        self.OBSTACLE_PENALTY_WEIGHT = 50.0
+        
         self.DEVICE = DEVICE
 
 
