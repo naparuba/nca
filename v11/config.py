@@ -14,7 +14,7 @@ class ModularConfig:
         
         self.VISUALIZATION_SEED = 3333
         
-        self.NB_EPOCHS_BY_STAGE = 50  # 200
+        self.NB_EPOCHS_BY_STAGE = 200
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
         

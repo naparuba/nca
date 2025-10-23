@@ -9,6 +9,7 @@ from config import CONFIG, DEVICE
 from stage_manager import STAGE_MANAGER
 from stages.base_stage import REALITY_LAYER
 from torched import AdamW, get_MSELoss
+from visualizer import get_visualizer
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
@@ -182,6 +183,10 @@ class Trainer:
         # Entraînement séquentiel
         for stage in STAGE_MANAGER.get_stages():
             self._train_stage(stage, CONFIG.NB_EPOCHS_BY_STAGE)
+            
+            # Use the current model state to compute the visualizations for this stage
+            get_visualizer().visualize_stage_results(self._model, stage)
+            
         
         # Métriques globales
         total_time = time.time() - start_time

@@ -176,3 +176,13 @@ class ProgressiveVisualizer:
         plt.savefig(Path(CONFIG.OUTPUT_DIR) / "curriculum_progression.png",
                     dpi=150, bbox_inches='tight')
         plt.close()
+
+
+
+_visualizer = None
+
+def get_visualizer():
+    global _visualizer
+    if _visualizer is None:
+        _visualizer = ProgressiveVisualizer()
+    return _visualizer

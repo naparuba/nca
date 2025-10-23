@@ -11,7 +11,7 @@ import torch
 from nca_model import NCA
 from stage_manager import STAGE_MANAGER
 from trainer import Trainer
-from visualizer import ProgressiveVisualizer
+from visualizer import get_visualizer
 
 # Hack for imports
 sys.path.append(os.path.dirname(__file__))
@@ -107,11 +107,7 @@ def main():
         # Génération des visualisations progressives
         print("\n🎨 Génération des visualisations...")
         
-        visualizer = ProgressiveVisualizer()
-        
-        # Visualisation par étape avec le modèle final
-        for stage in STAGE_MANAGER.get_stages():
-            visualizer.visualize_stage_results(model, stage)
+        visualizer = get_visualizer()
         
         # Résumé visuel complet du curriculum
         visualizer.create_curriculum_summary()
