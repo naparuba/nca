@@ -1,3 +1,4 @@
+import argparse
 import os
 # HACK for imports
 import sys
@@ -16,6 +17,53 @@ from visualizer import ProgressiveVisualizer
 sys.path.append(os.path.dirname(__file__))
 
 from config import CONFIG, DEVICE
+
+
+def parse_command_line_args() -> None:
+    """
+    Parse les arguments de ligne de commande et met à jour la configuration.
+    
+    Permet de surcharger les valeurs par défaut de CONFIG via des arguments CLI.
+    Cette approche facilite l'expérimentation sans modifier le code source.
+    
+    Arguments supportés:
+    - --epochs: Nombre d'époques par étape d'entraînement
+    - --nca-steps: Nombre d'étapes NCA par séquence de simulation
+    - --hidden-size: Taille de la couche cachée du réseau de neurones
+    - --n-layers: Nombre de couches du réseau de neurones
+    """
+    parser = argparse.ArgumentParser(description="Neural Cellular Automaton - Apprentissage modulaire progressif")
+    # Arguments pour surcharger les paramètres d'entraînement
+    parser.add_argument("--epochs", type=int, default=CONFIG.NB_EPOCHS_BY_STAGE, help="Epoques par stage")
+    parser.add_argument("--nca-steps", type=int, default=CONFIG.NCA_STEPS, help="étapes temporelle par simulation")
+    # Arguments pour surcharger l'architecture du modèle
+    parser.add_argument("--hidden-size", type=int, default=CONFIG.HIDDEN_SIZE)
+    parser.add_argument("--n-layers", type=int, default=CONFIG.N_LAYERS)
+    
+    # Parse des arguments et mise à jour de la configuration
+    args = parser.parse_args()
+    
+    # Application des valeurs surchargées à la configuration globale
+    # Ces modifications affectent tous les composants qui utilisent CONFIG
+    CONFIG.NB_EPOCHS_BY_STAGE = args.epochs
+    CONFIG.NCA_STEPS = args.nca_steps
+    CONFIG.HIDDEN_SIZE = args.hidden_size
+    CONFIG.N_LAYERS = args.n_layers
+    
+    # Recalcul du nombre total d'époques basé sur la nouvelle valeur par étape
+    CONFIG.TOTAL_EPOCHS = CONFIG.NB_EPOCHS_BY_STAGE * len(STAGE_MANAGER.get_stages())
+    
+    # Affichage des paramètres effectifs pour confirmation
+    print(f"📋 Configuration effective:")
+    print(f"   • Époques par étape: {CONFIG.NB_EPOCHS_BY_STAGE}")
+    print(f"   • Étapes NCA: {CONFIG.NCA_STEPS}")
+    print(f"   • Taille cachée: {CONFIG.HIDDEN_SIZE}")
+    print(f"   • Nombre de couches: {CONFIG.N_LAYERS}")
+    print(f"   • Total époques: {CONFIG.TOTAL_EPOCHS}")
+
+
+# Initialisation - Application des arguments CLI avant tout le reste
+parse_command_line_args()
 
 # Initialisation
 torch.manual_seed(CONFIG.SEED)
