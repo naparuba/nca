@@ -14,7 +14,8 @@ class ModularConfig:
         
         self.VISUALIZATION_SEED = 3333
         
-        self.NB_EPOCHS_BY_STAGE = 200
+        self.NB_EPOCHS_BY_STAGE = 50#200
+        self.NB_EPOCHS_FOR_EVALUATION = 50
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
         
@@ -31,6 +32,7 @@ class ModularConfig:
         # Paramètres de visualisation
         self.POSTVIS_STEPS = 50
         self.OUTPUT_DIR = "outputs"
+        self.PERFORMANCE_FILE = "evaluation_performances.json"
         
         # Paramètres du modèle
         self.HIDDEN_SIZE = 128

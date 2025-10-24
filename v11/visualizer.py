@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
+import json
 
 import matplotlib.animation as animation
 import numpy as np
@@ -10,6 +11,7 @@ from config import CONFIG
 from nca_model import NCA
 from stage_manager import STAGE_MANAGER
 from stages.base_stage import REALITY_LAYER
+from torched import get_MSELoss
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
@@ -20,6 +22,142 @@ class ProgressiveVisualizer:
     Système de visualisation avancé pour l'apprentissage modulaire.
     Génère des animations et graphiques comparatifs par étape.
     """
+    
+    def __init__(self):
+        self._loss_fn = get_MSELoss()
+    
+    
+    def evaluate_model_stage(self, model, stage):
+        # type: (NCA, BaseStage) -> None
+        
+        stage_nb = stage.get_stage_nb()
+        
+        print(f"\n🔍 Évaluation du modèle à l'étape {stage_nb}...")
+        
+        # Génération de la séquence de test avec seed fixe
+        torch.manual_seed(CONFIG.VISUALIZATION_SEED)
+        np.random.seed(CONFIG.VISUALIZATION_SEED)
+        
+        total_loss = torch.tensor(0.0, device=CONFIG.DEVICE)
+        
+        losses = [] # type: List[float]
+        
+        for nb_evaluation in range(CONFIG.NB_EPOCHS_FOR_EVALUATION):
+            reality_worlds, nca_temporal_sequence = self.generate_and_run_one_sequence(model, stage)
+            
+            for temporal_step in range(1, len(nca_temporal_sequence)):
+                grid_pred = nca_temporal_sequence[temporal_step]
+                target = reality_worlds[temporal_step].get_as_tensor()
+                step_loss = self._loss_fn(grid_pred, target)
+                losses.append(step_loss.item())
+                total_loss = total_loss + step_loss
+        
+        avg_losses = sum(losses)/len(losses)
+        std_dev_losses = np.std(losses)
+        
+        print(f"✅ Évaluation étape {stage_nb} terminée. Perte MSE finale: {total_loss.item():.6f}  Avg Loss: {avg_losses:.6f}  Std Dev: {std_dev_losses:.6f}")
+        
+        # Sauvegarde des performances dans le fichier JSON
+        self._save_evaluation_performance(
+            stage_nb=stage_nb,
+            n_layers=CONFIG.N_LAYERS,
+            hidden_size=CONFIG.HIDDEN_SIZE,
+            nb_epochs_trained=CONFIG.NB_EPOCHS_BY_STAGE,
+            total_loss=total_loss.item(),
+            avg_loss=avg_losses,
+            std_dev=std_dev_losses,
+            nb_evaluations=CONFIG.NB_EPOCHS_FOR_EVALUATION
+        )
+    
+    
+    def _save_evaluation_performance(self, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev, nb_evaluations):
+        # type: (int, int, int, int, float, float, float, int) -> None
+        """
+        Sauvegarde les performances d'évaluation dans un fichier JSON structuré.
+        
+        Structure du JSON:
+        {
+            "stage_1": {
+                "3": {  # n_layers
+                    "128": {  # hidden_size
+                        "50": {  # nb_epochs_trained
+                            "total_loss": 0.123,
+                            "avg_loss": 0.0045,
+                            "std_dev": 0.001,
+                            "nb_evaluations": 50
+                        }
+                    }
+                }
+            }
+        }
+        
+        Si le fichier existe déjà, on charge les données existantes et on met à jour
+        uniquement les valeurs concernées sans perdre les autres runs.
+        """
+        perf_file = Path(CONFIG.OUTPUT_DIR) / CONFIG.PERFORMANCE_FILE
+        
+        # Charger les données existantes si le fichier existe
+        if perf_file.exists():
+            with open(perf_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            data = {}
+        
+        # Créer les clés de structure si elles n'existent pas
+        stage_key = f"stage_{stage_nb}"
+        layers_key = str(n_layers)
+        hidden_key = str(hidden_size)
+        epochs_key = str(nb_epochs_trained)
+        
+        if stage_key not in data:
+            data[stage_key] = {}
+        if layers_key not in data[stage_key]:
+            data[stage_key][layers_key] = {}
+        if hidden_key not in data[stage_key][layers_key]:
+            data[stage_key][layers_key][hidden_key] = {}
+        
+        # Mettre à jour les performances pour cette configuration
+        data[stage_key][layers_key][hidden_key][epochs_key] = {
+            "total_loss": total_loss,
+            "avg_loss": avg_loss,
+            "std_dev": std_dev,
+            "nb_evaluations": nb_evaluations
+        }
+        
+        # Sauvegarder le fichier JSON avec indentation pour lisibilité
+        perf_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(perf_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        
+        print(f"💾 Performances sauvegardées dans {perf_file}")
+    
+    
+    def generate_and_run_one_sequence(self, model, stage):
+        # type: (NCA, BaseStage) -> (List, List)
+        simulation_temporal_sequence = stage.generate_simulation_temporal_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
+        
+        # Prédiction du modèle
+        model.eval()
+        
+        # Simulation NCA avec torch.no_grad() pour éviter le gradient
+        reality_worlds = simulation_temporal_sequence.get_reality_worlds()
+        source_mask = simulation_temporal_sequence.get_source_mask()
+        obstacle_mask = simulation_temporal_sequence.get_obstacle_mask()
+        
+        # Run model
+        nca_temporal_sequence = []
+        world_nca_prediction = torch.zeros_like(reality_worlds[0].get_as_tensor())  # start with the same start as reality
+        # On accède à la couche température (REALITY_LAYER.TEMPERATURE = 0) avant d'appliquer le masque
+        world_nca_prediction[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY
+        world_nca_prediction[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # configure the obstacles
+        nca_temporal_sequence.append(world_nca_prediction.clone())
+        
+        with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
+            for _ in range(CONFIG.POSTVIS_STEPS):
+                world_nca_prediction = model.run_step(world_nca_prediction, source_mask)  # , obstacle_mask)
+                nca_temporal_sequence.append(world_nca_prediction.clone())
+        
+        return reality_worlds, nca_temporal_sequence
     
     
     # Visualise les résultats d'une étape spécifique
@@ -34,27 +172,7 @@ class ProgressiveVisualizer:
         torch.manual_seed(CONFIG.VISUALIZATION_SEED)
         np.random.seed(CONFIG.VISUALIZATION_SEED)
         
-        simulation_temporal_sequence = stage.generate_simulation_temporal_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
-        
-        # Prédiction du modèle
-        model.eval()
-        
-        # Simulation NCA avec torch.no_grad() pour éviter le gradient
-        reality_worlds = simulation_temporal_sequence.get_reality_worlds()
-        source_mask = simulation_temporal_sequence.get_source_mask()
-        obstacle_mask = simulation_temporal_sequence.get_obstacle_mask()
-        
-        nca_temporal_sequence = []
-        world_nca_prediction = torch.zeros_like(reality_worlds[0].get_as_tensor())  # start with the same start as reality
-        # On accède à la couche température (REALITY_LAYER.TEMPERATURE = 0) avant d'appliquer le masque
-        world_nca_prediction[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY
-        world_nca_prediction[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # configure the obstacles
-        nca_temporal_sequence.append(world_nca_prediction.clone())
-        
-        with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
-            for _ in range(CONFIG.POSTVIS_STEPS):
-                world_nca_prediction = model.run_step(world_nca_prediction, source_mask)  # , obstacle_mask)
-                nca_temporal_sequence.append(world_nca_prediction.clone())
+        reality_worlds, nca_temporal_sequence = self.generate_and_run_one_sequence(model, stage)
         
         # .detach() pour sécurité
         vis_data = {
@@ -89,7 +207,7 @@ class ProgressiveVisualizer:
     
     @staticmethod
     def _save_comparison_gif(reality_worlds, nca_temporal_sequence, filepath):
-        # type: (List[np.ndarray], List[np.ndarray], np.ndarray, Path) -> None
+        # type: (List[np.ndarray], List[np.ndarray], Path) -> None
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
@@ -128,6 +246,174 @@ class ProgressiveVisualizer:
         self._plot_curriculum_progression()
         
         print("✅ Résumé visuel complet généré")
+    
+    
+    def plot_performance_comparison(self):
+        # type: () -> None
+        """
+        Génère un graphique de comparaison des performances depuis le fichier JSON.
+        
+        Affiche un bar plot avec:
+        - X: Labels combinés "S{stage}_L{layers}_H{hidden}_E{epochs}"
+        - Y: avg_loss avec error bars (std_dev)
+        - Background coloré par stage
+        - Annotations pour la meilleure configuration
+        """
+        print("\n📊 Génération du graphique de comparaison des performances...")
+        
+        perf_file = Path(CONFIG.OUTPUT_DIR) / CONFIG.PERFORMANCE_FILE
+        
+        if not perf_file.exists():
+            print(f"⚠️ Fichier {perf_file} introuvable. Aucune performance à visualiser.")
+            return
+        
+        # Charger les données
+        with open(perf_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extraire et trier les configurations
+        configurations = []
+        
+        for stage_key in sorted(data.keys(), key=lambda x: int(x.split('_')[1])):
+            stage_nb = int(stage_key.split('_')[1])
+            
+            for n_layers in sorted(data[stage_key].keys(), key=int):
+                for hidden_size in sorted(data[stage_key][n_layers].keys(), key=int):
+                    for nb_epochs in sorted(data[stage_key][n_layers][hidden_size].keys(), key=int):
+                        metrics = data[stage_key][n_layers][hidden_size][nb_epochs]
+                        
+                        configurations.append({
+                            'stage': stage_nb,
+                            'n_layers': int(n_layers),
+                            'hidden_size': int(hidden_size),
+                            'nb_epochs': int(nb_epochs),
+                            'avg_loss': metrics['avg_loss'],
+                            'std_dev': metrics['std_dev'],
+                            'label': f"S{stage_nb}_L{n_layers}_H{hidden_size}_E{nb_epochs}"
+                        })
+        
+        if not configurations:
+            print("⚠️ Aucune configuration trouvée dans le fichier JSON.")
+            return
+        
+        # Préparer les données pour le plot
+        labels = [cfg['label'] for cfg in configurations]
+        avg_losses = [cfg['avg_loss'] for cfg in configurations]
+        std_devs = [cfg['std_dev'] for cfg in configurations]
+        stages = [cfg['stage'] for cfg in configurations]
+        
+        # Trouver la meilleure configuration (plus petite avg_loss)
+        best_idx = avg_losses.index(min(avg_losses))
+        
+        # Créer le graphique
+        fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
+        
+        # Récupérer les couleurs des stages depuis le STAGE_MANAGER
+        stage_colors = {}
+        for stage in STAGE_MANAGER.get_stages():
+            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        
+        # Couleurs des barres selon le stage
+        bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
+        
+        # Tracer les barres avec error bars
+        x_positions = range(len(configurations))
+        bars = ax.bar(x_positions, avg_losses, yerr=std_devs,
+                     color=bar_colors, alpha=0.7, capsize=5,
+                     edgecolor='black', linewidth=1.5)
+        
+        # Mettre en évidence la meilleure configuration
+        bars[best_idx].set_edgecolor('gold')
+        bars[best_idx].set_linewidth(3)
+        bars[best_idx].set_alpha(1.0)
+        
+        # Ajouter une étoile sur la meilleure configuration
+        ax.text(best_idx, avg_losses[best_idx] + std_devs[best_idx], '⭐',
+                ha='center', va='bottom', fontsize=20, color='gold')
+        
+        # Ajouter des zones de background colorées par stage
+        current_stage = stages[0]
+        stage_start = 0
+        
+        for i in range(1, len(stages) + 1):
+            if i == len(stages) or stages[i] != current_stage:
+                # Fin d'une zone de stage
+                stage_end = i
+                ax.axvspan(stage_start - 0.5, stage_end - 0.5,
+                          alpha=0.15, color=stage_colors.get(current_stage, 'gray'),
+                          zorder=0)
+                
+                # Ligne de séparation
+                if i < len(stages):
+                    ax.axvline(x=i - 0.5, color='black', linestyle='--',
+                              linewidth=2, alpha=0.5)
+                
+                # Préparer pour le prochain stage
+                if i < len(stages):
+                    current_stage = stages[i]
+                    stage_start = i
+        
+        # Ajouter une ligne de tendance (moyenne mobile simple sur 3 points)
+        if len(avg_losses) >= 3:
+            from scipy.ndimage import uniform_filter1d
+            smoothed = uniform_filter1d(avg_losses, size=min(5, len(avg_losses)), mode='nearest')
+            ax.plot(x_positions, smoothed, 'r--', linewidth=2,
+                   alpha=0.6, label='Tendance (moyenne mobile)')
+        
+        # Configuration des axes
+        ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Perte Moyenne (avg_loss)', fontsize=12, fontweight='bold')
+        ax.set_title('Comparaison des Performances par Configuration\n(error bars = écart-type)',
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        # Labels en X avec rotation
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
+        
+        # Grille horizontale
+        ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # Échelle logarithmique en Y si les valeurs varient beaucoup
+        if max(avg_losses) / min(avg_losses) > 10:
+            ax.set_yscale('log')
+            ax.set_ylabel('Perte Moyenne (avg_loss) - échelle log', fontsize=12, fontweight='bold')
+        
+        # Légende des stages
+        from matplotlib.patches import Patch
+        legend_elements = []
+        for stage in sorted(set(stages)):
+            legend_elements.append(
+                Patch(facecolor=stage_colors.get(stage, 'gray'),
+                     alpha=0.7, edgecolor='black',
+                     label=f'Stage {stage}')
+            )
+        
+        if len(avg_losses) >= 3:
+            from matplotlib.lines import Line2D
+            legend_elements.append(
+                Line2D([0], [0], color='r', linestyle='--', linewidth=2,
+                      alpha=0.6, label='Tendance')
+            )
+        
+        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+        
+        # Annotations pour la meilleure config
+        best_config = configurations[best_idx]
+        textstr = f"🏆 Meilleure config:\n{best_config['label']}\nLoss: {best_config['avg_loss']:.6f} ± {best_config['std_dev']:.6f}"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='gold', linewidth=2)
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        
+        plt.tight_layout()
+        
+        # Sauvegarder
+        output_path = Path(CONFIG.OUTPUT_DIR) / "evaluation_performances.png"
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Graphique de performances sauvegardé dans {output_path}")
+        print(f"🏆 Meilleure configuration: {best_config['label']} avec loss={best_config['avg_loss']:.6f}")
     
     
     @staticmethod
@@ -178,8 +464,8 @@ class ProgressiveVisualizer:
         plt.close()
 
 
-
 _visualizer = None
+
 
 def get_visualizer():
     global _visualizer

@@ -5,15 +5,15 @@ from typing import Tuple, List
 
 import torch
 from config import CONFIG
+from reality_world import RealityWorld
 from simulation_temporal_sequence import SimulationTemporalSequence
 from torch.nn import functional as F
-
-from reality_world import RealityWorld
 
 
 class REALITY_LAYER:
     TEMPERATURE = 0
     OBSTACLE = 1
+
 
 ALL_REALITY_LAYERS = [REALITY_LAYER.TEMPERATURE, REALITY_LAYER.OBSTACLE]
 
@@ -36,6 +36,9 @@ class BaseStage(ABC):
         # CACHE
         self._reality_temporal_sequences_for_training = []  # type: List[SimulationTemporalSequence]
         self._reality_temporal_sequences_for_training_current_indices = 0
+        
+        # Evaluation part
+        self._reality_temporal_sequences_for_evaluation = []  # type: List[SimulationTemporalSequence]
         
         # step player
         self._kernel_avg_3x3 = torch.ones((1, 1, 3, 3), device=CONFIG.DEVICE) / 9.0  # Average 3x3
@@ -144,7 +147,8 @@ class BaseStage(ABC):
             raise Exception("Le cache de séquences n'a pas été généré pour l'étape {stage_nb}.")
         
         # Récupère l'échantillon courant et avance l'index
-        sequence = self._reality_temporal_sequences_for_training[self._reality_temporal_sequences_for_training_current_indices]  # type: SimulationTemporalSequence
+        sequence = self._reality_temporal_sequences_for_training[
+            self._reality_temporal_sequences_for_training_current_indices]  # type: SimulationTemporalSequence
         self._reality_temporal_sequences_for_training_current_indices = (self._reality_temporal_sequences_for_training_current_indices + 1) % len(
                 self._reality_temporal_sequences_for_training)
         
@@ -166,6 +170,18 @@ class BaseStage(ABC):
         
         print(f"\r✅ Cache étape {self.get_stage_nb()} créé ({cache_size} séquences)")
     
+    
+    def generate_reality_sequences_for_evaluation(self):
+        print(f"Génération de {CONFIG.NB_EPOCHS_FOR_EVALUATION} séquences pour Evaluation de {self.get_stage_nb()}...", end='', flush=True)
+        
+        # sequences = []  # :Type: List[Sequence]
+        for i in range(CONFIG.NB_EPOCHS_FOR_EVALUATION):
+            simulation_temporal_sequence = self.generate_simulation_temporal_sequence(n_steps=CONFIG.NCA_STEPS, size=CONFIG.GRID_SIZE)
+            self._reality_temporal_sequences_for_evaluation.append(simulation_temporal_sequence)
+    
+    
+    def get_sequence_for_evaluation(self):
+        return self._reality_temporal_sequences_for_evaluation.pop(0)
     
     def generate_simulation_temporal_sequence(self, n_steps, size):
         # type: (int, int) -> SimulationTemporalSequence

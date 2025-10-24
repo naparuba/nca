@@ -163,7 +163,6 @@ class Trainer:
         
         stage.set_metrics(epoch_in_stage + 1, stage_losses, stage_lrs)
         
-        print(f"✅ === ÉTAPE {stage_nb} - TERMINÉE ===")
         print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
         
         # Sauvegarde du checkpoint d'étape
@@ -184,9 +183,10 @@ class Trainer:
         for stage in STAGE_MANAGER.get_stages():
             self._train_stage(stage, CONFIG.NB_EPOCHS_BY_STAGE)
             
+            get_visualizer().evaluate_model_stage(self._model, stage)
+            
             # Use the current model state to compute the visualizations for this stage
             get_visualizer().visualize_stage_results(self._model, stage)
-            
         
         # Métriques globales
         total_time = time.time() - start_time

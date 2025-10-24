@@ -111,6 +111,7 @@ def main():
         
         # Résumé visuel complet du curriculum
         visualizer.create_curriculum_summary()
+        visualizer.plot_performance_comparison()
         
         # Rapport final
         print(f"\n" + "=" * 80)
