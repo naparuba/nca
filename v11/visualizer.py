@@ -101,10 +101,30 @@ class ProgressiveVisualizer:
                 losses.append(step_loss.item())
                 total_loss = total_loss + step_loss
         
-        avg_losses = sum(losses)/len(losses)
-        std_dev_losses = np.std(losses)
+        # Filtrage des outliers : on garde les 80% centraux (retire 10% top et 10% bottom)
+        # Tri des losses pour identifier les percentiles
+        sorted_losses = sorted(losses)
+        n_total = len(sorted_losses)
         
-        print(f"✅ Évaluation étape {stage_nb} terminée. Perte MSE finale: {total_loss.item():.6f}  Avg Loss: {avg_losses:.6f}  Std Dev: {std_dev_losses:.6f}")
+        # Calcul des indices pour garder les 80% centraux
+        # On retire 10% du bas et 10% du haut
+        lower_cutoff_idx = int(n_total * 0.10)  # Index de début (10% bas)
+        upper_cutoff_idx = int(n_total * 0.90)  # Index de fin (90%, donc on vire 10% haut)
+        
+        # Extraction des 80% centraux
+        filtered_losses = sorted_losses[lower_cutoff_idx:upper_cutoff_idx]
+        n_filtered = len(filtered_losses)
+        
+        # Calcul des statistiques sur les données filtrées
+        avg_losses = sum(filtered_losses) / n_filtered if n_filtered > 0 else 0.0
+        std_dev_losses = np.std(filtered_losses) if n_filtered > 0 else 0.0
+        
+        print(f"✅ Évaluation étape {stage_nb} terminée.")
+        print(f"   Total loss (all): {total_loss.item():.6f}")
+        print(f"   Données filtrées: {n_filtered}/{n_total} ({n_filtered/n_total*100:.1f}% conservés)")
+        print(f"   Outliers retirés: {lower_cutoff_idx} (low) + {n_total - upper_cutoff_idx} (high)")
+        print(f"   Avg Loss (80% centraux): {avg_losses:.6f}")
+        print(f"   Std Dev (80% centraux): {std_dev_losses:.6f}")
         
         # Sauvegarde des performances dans le fichier JSON
         self._save_evaluation_performance(
