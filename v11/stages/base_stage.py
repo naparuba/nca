@@ -156,7 +156,7 @@ class BaseStage(ABC):
     
     
     def generate_reality_sequences_for_training(self):
-        cache_size = CONFIG.STAGE_CACHE_SIZE
+        cache_size = CONFIG.NB_EPOCHS_BY_STAGE
         print(f"🎯 Génération de {cache_size} séquences pour l'étape {self.get_stage_nb()}...", end='', flush=True)
         
         # sequences = []  # :Type: List[Sequence]

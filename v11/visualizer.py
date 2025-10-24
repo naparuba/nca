@@ -27,6 +27,55 @@ class ProgressiveVisualizer:
         self._loss_fn = get_MSELoss()
     
     
+    def check_configuration_already_evaluated(self, stage_nb, n_layers, hidden_size, nb_epochs_trained):
+        # type: (int, int, int, int) -> bool
+        """
+        Vérifie si une configuration spécifique a déjà été évaluée et sauvegardée.
+        
+        Cette méthode permet d'éviter de ré-entraîner une configuration déjà testée,
+        ce qui économise du temps de calcul lors d'expérimentations multiples.
+        
+        Args:
+            stage_nb: Numéro du stage à vérifier
+            n_layers: Nombre de couches du modèle
+            hidden_size: Taille de la couche cachée
+            nb_epochs_trained: Nombre d'époques d'entraînement
+        
+        Returns:
+            True si la configuration existe déjà dans le fichier JSON, False sinon
+        """
+        perf_file = Path(CONFIG.OUTPUT_DIR) / CONFIG.PERFORMANCE_FILE
+        
+        # Si le fichier n'existe pas, aucune configuration n'a été évaluée
+        if not perf_file.exists():
+            return False
+        
+        try:
+            # Charger les données existantes
+            with open(perf_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            # Construire les clés de navigation dans la structure JSON
+            stage_key = f"stage_{stage_nb}"
+            layers_key = str(n_layers)
+            hidden_key = str(hidden_size)
+            epochs_key = str(nb_epochs_trained)
+            
+            # Vérifier si toute la chaîne de clés existe
+            if stage_key in data:
+                if layers_key in data[stage_key]:
+                    if hidden_key in data[stage_key][layers_key]:
+                        if epochs_key in data[stage_key][layers_key][hidden_key]:
+                            # Configuration trouvée
+                            return True
+            
+            return False
+        
+        except (json.JSONDecodeError, KeyError):
+            # En cas d'erreur de lecture, on considère que la config n'existe pas
+            return False
+    
+    
     def evaluate_model_stage(self, model, stage):
         # type: (NCA, BaseStage) -> None
         

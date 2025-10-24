@@ -48,6 +48,9 @@ class ModularConfig:
         # STAGE CACHE SIZES
         self.STAGE_CACHE_SIZE = 250
         
+        # Options de ligne de commande (surchargées par argparse)
+        self.SKIP_IF_ALREADY = False
+        
         self.DEVICE = DEVICE
 
 

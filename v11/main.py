@@ -31,6 +31,7 @@ def parse_command_line_args() -> None:
     - --nca-steps: Nombre d'étapes NCA par séquence de simulation
     - --hidden-size: Taille de la couche cachée du réseau de neurones
     - --n-layers: Nombre de couches du réseau de neurones
+    - --skip-if-already: Évite de ré-entraîner une configuration déjà évaluée
     """
     parser = argparse.ArgumentParser(description="Neural Cellular Automaton - Apprentissage modulaire progressif")
     # Arguments pour surcharger les paramètres d'entraînement
@@ -39,6 +40,9 @@ def parse_command_line_args() -> None:
     # Arguments pour surcharger l'architecture du modèle
     parser.add_argument("--hidden-size", type=int, default=CONFIG.HIDDEN_SIZE)
     parser.add_argument("--n-layers", type=int, default=CONFIG.N_LAYERS)
+    # Optimisation pour éviter les calculs redondants
+    parser.add_argument("--skip-if-already", action="store_true",
+                       help="Saute l'entraînement si la configuration a déjà été évaluée")
     
     # Parse des arguments et mise à jour de la configuration
     args = parser.parse_args()
@@ -49,6 +53,7 @@ def parse_command_line_args() -> None:
     CONFIG.NCA_STEPS = args.nca_steps
     CONFIG.HIDDEN_SIZE = args.hidden_size
     CONFIG.N_LAYERS = args.n_layers
+    CONFIG.SKIP_IF_ALREADY = args.skip_if_already
     
     # Recalcul du nombre total d'époques basé sur la nouvelle valeur par étape
     CONFIG.TOTAL_EPOCHS = CONFIG.NB_EPOCHS_BY_STAGE * len(STAGE_MANAGER.get_stages())
@@ -60,6 +65,7 @@ def parse_command_line_args() -> None:
     print(f"   • Taille cachée: {CONFIG.HIDDEN_SIZE}")
     print(f"   • Nombre de couches: {CONFIG.N_LAYERS}")
     print(f"   • Total époques: {CONFIG.TOTAL_EPOCHS}")
+    print(f"   • Skip si déjà évalué: {CONFIG.SKIP_IF_ALREADY}")
 
 
 # Initialisation - Application des arguments CLI avant tout le reste
@@ -88,6 +94,32 @@ def main():
     print(f"=" * 80)
     
     try:
+        # Vérification si la configuration a déjà été évaluée (si option activée)
+        if CONFIG.SKIP_IF_ALREADY:
+            print("\n🔍 Vérification si la configuration a déjà été évaluée...")
+            visualizer = get_visualizer()
+            
+            # Vérifier pour tous les stages si la configuration existe
+            all_stages_already_evaluated = True
+            for stage in STAGE_MANAGER.get_stages():
+                stage_nb = stage.get_stage_nb()
+                already_evaluated = visualizer.check_configuration_already_evaluated(
+                    stage_nb=stage_nb,
+                    n_layers=CONFIG.N_LAYERS,
+                    hidden_size=CONFIG.HIDDEN_SIZE,
+                    nb_epochs_trained=CONFIG.NB_EPOCHS_BY_STAGE
+                )
+                
+                if not already_evaluated:
+                    all_stages_already_evaluated = False
+                    print(f"   ❌ Stage {stage_nb}: Non évalué")
+                else:
+                    print(f"   ✅ Stage {stage_nb}: Déjà évalué")
+            
+            if all_stages_already_evaluated:
+                print(f"\n⏭️  Configuration déjà évaluée pour tous les stages! N_LAYERS={CONFIG.N_LAYERS} HIDDEN_SIZE={CONFIG.HIDDEN_SIZE} NB_EPOCHS={CONFIG.NB_EPOCHS_BY_STAGE}")
+                sys.exit(0)
+        
         # Initialisation du modèle
         print("\n🔧 Initialisation du modèle...")
         model = NCA().to(DEVICE)
