@@ -249,6 +249,13 @@ class BaseStage(ABC):
         # Les obstacles restent à 0 dans la couche température (pas de chaleur dans les obstacles)
         new_grid[REALITY_LAYER.TEMPERATURE][obstacle_mask] = 0.0
         
+        # Clipping pour limiter la diffusion infinie :
+        # On remet à 0.0 les zones où la température est descendue en dessous de 1% de l'intensité maximale de la source
+        # Cela évite d'avoir des valeurs infinitésimales qui s'étalent indéfiniment sur toute la grille
+        # et permet de maintenir des frontières nettes pour la zone d'influence thermique
+        threshold = CONFIG.SOURCE_INTENSITY * 0.01
+        new_grid[REALITY_LAYER.TEMPERATURE][new_grid[REALITY_LAYER.TEMPERATURE] < threshold] = 0.0
+        
         # La couche obstacles (REALITY_LAYER.OBSTACLE) reste inchangée (les obstacles ne bougent pas)
         
         return new_grid
