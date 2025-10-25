@@ -110,20 +110,52 @@ class ProgressiveVisualizer:
                 
                 # === MÉTRIQUES TEMPÉRATURE ===
                 
-                # 1. Pourcentage de cases correctes (vide vs chaleur)
+                # 1. Différence de distribution de chaleur sur les zones actives
                 # On considère qu'une case est "vide" si < 1% de SOURCE_INTENSITY, sinon elle a de la "chaleur"
                 threshold = CONFIG.SOURCE_INTENSITY * 0.01
                 target_temp = target[REALITY_LAYER.TEMPERATURE]
                 pred_temp = grid_pred[REALITY_LAYER.TEMPERATURE]
                 
-                # Classification binaire : vide (0) ou chaleur (1)
-                target_has_heat = (target_temp >= threshold).float()
-                pred_has_heat = (pred_temp >= threshold).float()
+                # Création des masques binaires pour identifier les zones avec chaleur
+                target_has_heat = (target_temp >= threshold)  # Boolean mask
+                pred_has_heat = (pred_temp >= threshold)      # Boolean mask
                 
-                # Pourcentage de cases correctement classifiées
-                correct_temp_cells = (target_has_heat == pred_has_heat).float().mean().item()
-                # print('CORRECT CELLS TEMP STEP:', target_has_heat == pred_has_heat,target_has_heat.size(), pred_has_heat.size())
-                temp_correct_cells_pct.append(correct_temp_cells * 100.0)  # En pourcentage
+                # Masque OR : zones où AU MOINS UNE des deux grilles (référence OU prédiction) a de la chaleur
+                # Cela permet de capturer à la fois :
+                # - Les zones où la référence a de la chaleur (pour détecter les manques)
+                # - Les zones où la prédiction a de la chaleur (pour détecter les surplus)
+                # Les zones où les deux sont vides ne sont PAS prises en compte
+                active_zones_mask = target_has_heat | pred_has_heat
+                
+                # Si aucune zone active (grille complètement vide partout), on met 0%
+                if active_zones_mask.sum().item() == 0:
+                    temp_distribution_similarity = 0.0
+                else:
+                    # Extraction des valeurs de température uniquement sur les zones actives
+                    target_values_on_active = target_temp[active_zones_mask]  # Valeurs de la référence (peuvent être 0 ou >0)
+                    pred_values_on_active = pred_temp[active_zones_mask]      # Valeurs de la prédiction (peuvent être 0 ou >0)
+                    
+                    # Calcul de la différence absolue entre les distributions
+                    # On normalise par la somme des valeurs de référence pour avoir un % de différence
+                    sum_target_on_active = target_values_on_active.sum().item()
+                    
+                    if sum_target_on_active > 0:
+                        # Différence absolue normalisée : mesure à quel point les distributions sont différentes
+                        # Si identiques : diff = 0 → similarité = 100%
+                        # Si très différentes : diff élevé → similarité faible
+                        absolute_diff = torch.abs(target_values_on_active - pred_values_on_active).sum().item()
+                        diff_percentage = (absolute_diff / sum_target_on_active) * 100.0
+                        
+                        # Similarité = 100% - diff% (plafonné à 0% minimum)
+                        # Une similarité de 100% signifie que les distributions sont identiques
+                        # Une similarité de 0% signifie que les différences dépassent 100% de la référence
+                        temp_distribution_similarity = max(0.0, 100.0 - diff_percentage)
+                    else:
+                        # Cas où la référence n'a pas de chaleur sur les zones actives
+                        # mais la prédiction en a (faux positifs purs)
+                        temp_distribution_similarity = 0.0
+                
+                temp_correct_cells_pct.append(temp_distribution_similarity)  # En pourcentage
                 
                 # 2. Rapport de chaleur totale (somme des chaleurs)
                 # Évite la division par zéro : si la référence est vide, on met un ratio à 0
