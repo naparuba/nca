@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
+import shutil
 
 import matplotlib.animation as animation
 import numpy as np
@@ -362,13 +363,24 @@ class ProgressiveVisualizer:
         stage_dir.mkdir(parents=True, exist_ok=True)
         
         # Animation comparative
+        gif_original_path = stage_dir / f"animation_comparaison_étape_{stage_nb}.gif"
         self._save_comparison_gif(
                 vis_data['reality_worlds'],
                 vis_data['nca_temporal_sequence'],
-                stage_dir / f"animation_comparaison_étape_{stage_nb}.gif"
+                gif_original_path
         )
         
+        # Copie du fichier avec un nom structuré incluant les paramètres du modèle
+        # Format: animation_S{stage}_L{layers}_H{hidden}_E{epochs}.gif
+        # Cela permet de conserver un historique de toutes les configurations testées
+        
+        gif_structured_name = f"animation_S{stage_nb}_L{CONFIG.N_LAYERS}_H{CONFIG.HIDDEN_SIZE}_E{CONFIG.NB_EPOCHS_BY_STAGE}.gif"
+        gif_structured_path = stage_dir / gif_structured_name
+        shutil.copy2(gif_original_path, gif_structured_path)
+        
         print(f"✅ Animations étape {stage_nb} sauvegardées dans {stage_dir}")
+        print(f"   📁 {gif_original_path.name}")
+        print(f"   📁 {gif_structured_name}")
     
     
     @staticmethod
@@ -414,176 +426,8 @@ class ProgressiveVisualizer:
         print("✅ Résumé visuel complet généré")
     
     
-    def plot_performance_comparison(self):
+    def _plot_curriculum_progression(self):
         # type: () -> None
-        """
-        Génère un graphique de comparaison des performances depuis le fichier JSON.
-        
-        Affiche un bar plot avec:
-        - X: Labels combinés "S{stage}_L{layers}_H{hidden}_E{epochs}"
-        - Y: avg_loss avec error bars (std_dev)
-        - Background coloré par stage
-        - Annotations pour la meilleure configuration
-        """
-        print("\n📊 Génération du graphique de comparaison des performances...")
-        
-        perf_file = Path(CONFIG.OUTPUT_DIR) / CONFIG.PERFORMANCE_FILE
-        
-        if not perf_file.exists():
-            print(f"⚠️ Fichier {perf_file} introuvable. Aucune performance à visualiser.")
-            return
-        
-        # Charger les données
-        with open(perf_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
-        # Extraire et trier les configurations
-        configurations = []
-        
-        for stage_key in sorted(data.keys(), key=lambda x: int(x.split('_')[1])):
-            stage_nb = int(stage_key.split('_')[1])
-            
-            for n_layers in sorted(data[stage_key].keys(), key=int):
-                for hidden_size in sorted(data[stage_key][n_layers].keys(), key=int):
-                    for nb_epochs in sorted(data[stage_key][n_layers][hidden_size].keys(), key=int):
-                        metrics = data[stage_key][n_layers][hidden_size][nb_epochs]
-                        
-                        configurations.append({
-                            'stage':       stage_nb,
-                            'n_layers':    int(n_layers),
-                            'hidden_size': int(hidden_size),
-                            'nb_epochs':   int(nb_epochs),
-                            'avg_loss':    metrics['avg_loss'],
-                            'std_dev':     metrics['std_dev'],
-                            'label':       f"S{stage_nb}_L{n_layers}_H{hidden_size}_E{nb_epochs}"
-                        })
-        
-        if not configurations:
-            print("⚠️ Aucune configuration trouvée dans le fichier JSON.")
-            return
-        
-        # Préparer les données pour le plot
-        labels = [cfg['label'] for cfg in configurations]
-        avg_losses = [cfg['avg_loss'] for cfg in configurations]
-        std_devs = [cfg['std_dev'] for cfg in configurations]
-        stages = [cfg['stage'] for cfg in configurations]
-        
-        # Trouver la meilleure configuration (plus petite avg_loss)
-        best_idx = avg_losses.index(min(avg_losses))
-        
-        # Créer le graphique
-        fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
-        
-        # Récupérer les couleurs des stages depuis le STAGE_MANAGER
-        stage_colors = {}
-        for stage in STAGE_MANAGER.get_stages():
-            stage_colors[stage.get_stage_nb()] = stage.get_color()
-        
-        # Couleurs des barres selon le stage
-        bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
-        
-        # Tracer les barres avec error bars
-        x_positions = range(len(configurations))
-        bars = ax.bar(x_positions, avg_losses, yerr=std_devs,
-                      color=bar_colors, alpha=0.7, capsize=5,
-                      edgecolor='black', linewidth=1.5)
-        
-        # Mettre en évidence la meilleure configuration
-        bars[best_idx].set_edgecolor('gold')
-        bars[best_idx].set_linewidth(3)
-        bars[best_idx].set_alpha(1.0)
-        
-        # Ajouter une étoile sur la meilleure configuration
-        ax.text(best_idx, avg_losses[best_idx] + std_devs[best_idx], '⭐',
-                ha='center', va='bottom', fontsize=20, color='gold')
-        
-        # Ajouter des zones de background colorées par stage
-        current_stage = stages[0]
-        stage_start = 0
-        
-        for i in range(1, len(stages) + 1):
-            if i == len(stages) or stages[i] != current_stage:
-                # Fin d'une zone de stage
-                stage_end = i
-                ax.axvspan(stage_start - 0.5, stage_end - 0.5,
-                           alpha=0.15, color=stage_colors.get(current_stage, 'gray'),
-                           zorder=0)
-                
-                # Ligne de séparation
-                if i < len(stages):
-                    ax.axvline(x=i - 0.5, color='black', linestyle='--',
-                               linewidth=2, alpha=0.5)
-                
-                # Préparer pour le prochain stage
-                if i < len(stages):
-                    current_stage = stages[i]
-                    stage_start = i
-        
-        # Ajouter une ligne de tendance (moyenne mobile simple sur 3 points)
-        if len(avg_losses) >= 3:
-            from scipy.ndimage import uniform_filter1d
-            smoothed = uniform_filter1d(avg_losses, size=min(5, len(avg_losses)), mode='nearest')
-            ax.plot(x_positions, smoothed, 'r--', linewidth=2,
-                    alpha=0.6, label='Tendance (moyenne mobile)')
-        
-        # Configuration des axes
-        ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Perte Moyenne (avg_loss)', fontsize=12, fontweight='bold')
-        ax.set_title('Comparaison des Performances par Configuration\n(error bars = écart-type)',
-                     fontsize=14, fontweight='bold', pad=20)
-        
-        # Labels en X avec rotation
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
-        
-        # Grille horizontale
-        ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
-        ax.set_axisbelow(True)
-        
-        # Échelle logarithmique en Y si les valeurs varient beaucoup
-        if max(avg_losses) / min(avg_losses) > 10:
-            ax.set_yscale('log')
-            ax.set_ylabel('Perte Moyenne (avg_loss) - échelle log', fontsize=12, fontweight='bold')
-        
-        # Légende des stages
-        from matplotlib.patches import Patch
-        legend_elements = []
-        for stage in sorted(set(stages)):
-            legend_elements.append(
-                    Patch(facecolor=stage_colors.get(stage, 'gray'),
-                          alpha=0.7, edgecolor='black',
-                          label=f'Stage {stage}')
-            )
-        
-        if len(avg_losses) >= 3:
-            from matplotlib.lines import Line2D
-            legend_elements.append(
-                    Line2D([0], [0], color='r', linestyle='--', linewidth=2,
-                           alpha=0.6, label='Tendance')
-            )
-        
-        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
-        
-        # Annotations pour la meilleure config
-        best_config = configurations[best_idx]
-        textstr = f"🏆 Meilleure config:\n{best_config['label']}\nLoss: {best_config['avg_loss']:.6f} ± {best_config['std_dev']:.6f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='gold', linewidth=2)
-        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
-                verticalalignment='top', bbox=props)
-        
-        plt.tight_layout()
-        
-        # Sauvegarder
-        output_path = Path(CONFIG.OUTPUT_DIR) / "evaluation_performances.png"
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        print(f"✅ Graphique de performances sauvegardé dans {output_path}")
-        print(f"🏆 Meilleure configuration: {best_config['label']} avec loss={best_config['avg_loss']:.6f}")
-    
-    
-    @staticmethod
-    def _plot_curriculum_progression():
         """Graphique de la progression globale du curriculum."""
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 15))
         
@@ -628,8 +472,487 @@ class ProgressiveVisualizer:
         plt.savefig(Path(CONFIG.OUTPUT_DIR) / "curriculum_progression.png",
                     dpi=150, bbox_inches='tight')
         plt.close()
-
-
+    
+    
+    def plot_performance_comparison(self):
+        # type: () -> None
+        """
+        Génère un graphique de comparaison des performances depuis le fichier JSON.
+        
+        Affiche un bar plot avec:
+        - X: Labels combinés "S{stage}_L{layers}_H{hidden}_E{epochs}"
+        - Y: avg_loss avec error bars (std_dev)
+        - Background coloré par stage
+        - Annotations pour la meilleure configuration
+        """
+        print("\n📊 Génération du graphique de comparaison des performances...")
+        
+        perf_file = Path(CONFIG.OUTPUT_DIR) / CONFIG.PERFORMANCE_FILE
+        
+        if not perf_file.exists():
+            print(f"⚠️ Fichier {perf_file} introuvable. Aucune performance à visualiser.")
+            return
+        
+        # Charger les données
+        with open(perf_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Extraire et trier les configurations
+        configurations = []
+        
+        for stage_key in sorted(data.keys(), key=lambda x: int(x.split('_')[1])):
+            stage_nb = int(stage_key.split('_')[1])
+            
+            for n_layers in sorted(data[stage_key].keys(), key=int):
+                for hidden_size in sorted(data[stage_key][n_layers].keys(), key=int):
+                    for nb_epochs in sorted(data[stage_key][n_layers][hidden_size].keys(), key=int):
+                        metrics = data[stage_key][n_layers][hidden_size][nb_epochs]
+                        
+                        # Extraction des métriques par couche (avec valeurs par défaut pour compatibilité)
+                        metrics_by_layer = metrics.get('metrics_by_layer', {})
+                        temp_metrics = metrics_by_layer.get('temperature', {})
+                        obstacle_metrics = metrics_by_layer.get('obstacles', {})
+                        
+                        configurations.append({
+                            'stage': stage_nb,
+                            'n_layers': int(n_layers),
+                            'hidden_size': int(hidden_size),
+                            'nb_epochs': int(nb_epochs),
+                            'avg_loss': metrics['avg_loss'],
+                            'std_dev': metrics['std_dev'],
+                            'label': f"S{stage_nb}_L{n_layers}_H{hidden_size}_E{nb_epochs}",
+                            # Nouvelles métriques
+                            'avg_temp_correct_pct': temp_metrics.get('avg_correct_cells_pct', 0.0),
+                            'std_temp_correct_pct': temp_metrics.get('std_correct_cells_pct', 0.0),
+                            'avg_temp_heat_ratio': temp_metrics.get('avg_heat_ratio_pct', 0.0),
+                            'std_temp_heat_ratio': temp_metrics.get('std_heat_ratio_pct', 0.0),
+                            'avg_obstacle_correct_pct': obstacle_metrics.get('avg_correct_cells_pct', 0.0),
+                            'std_obstacle_correct_pct': obstacle_metrics.get('std_correct_cells_pct', 0.0),
+                        })
+        
+        if not configurations:
+            print("⚠️ Aucune configuration trouvée dans le fichier JSON.")
+            return
+        
+        # Générer tous les graphiques
+        self._plot_avg_loss_comparison(configurations)
+        self._plot_temperature_correct_cells_comparison(configurations)
+        self._plot_temperature_heat_ratio_comparison(configurations)
+        self._plot_obstacle_correct_cells_comparison(configurations)
+        
+        print(f"✅ Tous les graphiques de performances générés dans {CONFIG.OUTPUT_DIR}")
+    
+    
+    def _plot_avg_loss_comparison(self, configurations):
+        # type: (List[Dict]) -> None
+        """Graphique de comparaison de la perte moyenne (avg_loss)"""
+        
+        # Préparer les données pour le plot
+        labels = [cfg['label'] for cfg in configurations]
+        avg_losses = [cfg['avg_loss'] for cfg in configurations]
+        std_devs = [cfg['std_dev'] for cfg in configurations]
+        stages = [cfg['stage'] for cfg in configurations]
+        
+        # Trouver la meilleure configuration (plus petite avg_loss)
+        best_idx = avg_losses.index(min(avg_losses))
+        
+        # Créer le graphique
+        fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
+        
+        # Récupérer les couleurs des stages depuis le STAGE_MANAGER
+        stage_colors = {}
+        for stage in STAGE_MANAGER.get_stages():
+            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        
+        # Couleurs des barres selon le stage
+        bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
+        
+        # Tracer les barres avec error bars
+        x_positions = range(len(configurations))
+        bars = ax.bar(x_positions, avg_losses, yerr=std_devs,
+                     color=bar_colors, alpha=0.7, capsize=5,
+                     edgecolor='black', linewidth=1.5)
+        
+        # Mettre en évidence la meilleure configuration
+        bars[best_idx].set_edgecolor('gold')
+        bars[best_idx].set_linewidth(3)
+        bars[best_idx].set_alpha(1.0)
+        
+        # Ajouter une étoile sur la meilleure configuration
+        ax.text(best_idx, avg_losses[best_idx] + std_devs[best_idx], '⭐',
+                ha='center', va='bottom', fontsize=20, color='gold')
+        
+        # Ajouter des zones de background colorées par stage
+        self._add_stage_backgrounds(ax, stages, stage_colors)
+        
+        # Ajouter une ligne de tendance (moyenne mobile simple sur 3 points)
+        if len(avg_losses) >= 3:
+            from scipy.ndimage import uniform_filter1d
+            smoothed = uniform_filter1d(avg_losses, size=min(5, len(avg_losses)), mode='nearest')
+            ax.plot(x_positions, smoothed, 'r--', linewidth=2,
+                   alpha=0.6, label='Tendance (moyenne mobile)')
+        
+        # Configuration des axes
+        ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Perte Moyenne (avg_loss)', fontsize=12, fontweight='bold')
+        ax.set_title('Comparaison des Performances par Configuration\n(error bars = écart-type)',
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        # Labels en X avec rotation
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
+        
+        # Grille horizontale
+        ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # Échelle logarithmique en Y si les valeurs varient beaucoup
+        if max(avg_losses) / min(avg_losses) > 10:
+            ax.set_yscale('log')
+            ax.set_ylabel('Perte Moyenne (avg_loss) - échelle log', fontsize=12, fontweight='bold')
+        
+        # Légende des stages
+        legend_elements = self._create_stage_legend(stages, stage_colors, len(avg_losses) >= 3)
+        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+        
+        # Annotations pour la meilleure config
+        best_config = configurations[best_idx]
+        textstr = f"🏆 Meilleure config:\n{best_config['label']}\nLoss: {best_config['avg_loss']:.6f} ± {best_config['std_dev']:.6f}"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8, edgecolor='gold', linewidth=2)
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        
+        plt.tight_layout()
+        
+        # Sauvegarder
+        output_path = Path(CONFIG.OUTPUT_DIR) / "evaluation_performances_avg_loss.png"
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Graphique avg_loss sauvegardé: {output_path.name}")
+        print(f"   🏆 Meilleure configuration: {best_config['label']} avec loss={best_config['avg_loss']:.6f}")
+    
+    
+    def _plot_temperature_correct_cells_comparison(self, configurations):
+        # type: (List[Dict]) -> None
+        """Graphique du % de cases correctes pour la température (vide/chaleur)"""
+        
+        labels = [cfg['label'] for cfg in configurations]
+        avg_values = [cfg['avg_temp_correct_pct'] for cfg in configurations]
+        std_values = [cfg['std_temp_correct_pct'] for cfg in configurations]
+        stages = [cfg['stage'] for cfg in configurations]
+        
+        # Filtrer les configurations sans données (valeur 0.0)
+        if all(v == 0.0 for v in avg_values):
+            print(f"⚠️ Aucune donnée disponible pour le graphique température (cases correctes)")
+            return
+        
+        # Trouver la meilleure configuration (plus grand % de cases correctes)
+        best_idx = avg_values.index(max(avg_values))
+        
+        fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
+        
+        # Récupérer les couleurs des stages
+        stage_colors = {}
+        for stage in STAGE_MANAGER.get_stages():
+            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        
+        bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
+        
+        # Tracer les barres
+        x_positions = range(len(configurations))
+        bars = ax.bar(x_positions, avg_values, yerr=std_values,
+                     color=bar_colors, alpha=0.7, capsize=5,
+                     edgecolor='black', linewidth=1.5)
+        
+        # Mettre en évidence la meilleure configuration
+        bars[best_idx].set_edgecolor('gold')
+        bars[best_idx].set_linewidth(3)
+        bars[best_idx].set_alpha(1.0)
+        
+        ax.text(best_idx, avg_values[best_idx] + std_values[best_idx], '⭐',
+                ha='center', va='bottom', fontsize=20, color='gold')
+        
+        # Background coloré par stage
+        self._add_stage_backgrounds(ax, stages, stage_colors)
+        
+        # Ligne de tendance
+        if len(avg_values) >= 3:
+            from scipy.ndimage import uniform_filter1d
+            smoothed = uniform_filter1d(avg_values, size=min(5, len(avg_values)), mode='nearest')
+            ax.plot(x_positions, smoothed, 'r--', linewidth=2, alpha=0.6, label='Tendance')
+        
+        # Configuration des axes
+        ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('% Cases Correctes (Vide/Chaleur)', fontsize=12, fontweight='bold')
+        ax.set_title('Température: Précision de Classification Vide/Chaleur\n(error bars = écart-type)',
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
+        
+        # Ligne de référence à 100%
+        ax.axhline(y=100, color='green', linestyle='--', linewidth=1, alpha=0.5, label='Perfection (100%)')
+        
+        # Limiter l'axe Y entre 0 et 100 (ou un peu plus pour voir les error bars)
+        ax.set_ylim(0, min(105, max(avg_values) + max(std_values) + 5))
+        
+        ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # Légende
+        legend_elements = self._create_stage_legend(stages, stage_colors, len(avg_values) >= 3, add_perfection=True)
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=10)
+        
+        # Annotations
+        best_config = configurations[best_idx]
+        textstr = f"🏆 Meilleure config:\n{best_config['label']}\nPrécision: {best_config['avg_temp_correct_pct']:.2f}% ± {best_config['std_temp_correct_pct']:.2f}%"
+        props = dict(boxstyle='round', facecolor='lightblue', alpha=0.8, edgecolor='gold', linewidth=2)
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        
+        plt.tight_layout()
+        
+        output_path = Path(CONFIG.OUTPUT_DIR) / "evaluation_performances_temp_correct_cells.png"
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Graphique température (cases correctes) sauvegardé: {output_path.name}")
+        print(f"   🏆 Meilleure: {best_config['label']} avec {best_config['avg_temp_correct_pct']:.2f}%")
+    
+    
+    def _plot_temperature_heat_ratio_comparison(self, configurations):
+        # type: (List[Dict]) -> None
+        """Graphique du ratio de chaleur totale (conservation de l'énergie)"""
+        
+        labels = [cfg['label'] for cfg in configurations]
+        avg_values = [cfg['avg_temp_heat_ratio'] for cfg in configurations]
+        std_values = [cfg['std_temp_heat_ratio'] for cfg in configurations]
+        stages = [cfg['stage'] for cfg in configurations]
+        
+        # Filtrer les configurations sans données
+        if all(v == 0.0 for v in avg_values):
+            print(f"⚠️ Aucune donnée disponible pour le graphique température (ratio chaleur)")
+            return
+        
+        # Trouver la meilleure configuration (plus proche de 100%)
+        best_idx = min(range(len(avg_values)), key=lambda i: abs(avg_values[i] - 100.0))
+        
+        fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
+        
+        # Récupérer les couleurs des stages
+        stage_colors = {}
+        for stage in STAGE_MANAGER.get_stages():
+            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        
+        bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
+        
+        # Tracer les barres
+        x_positions = range(len(configurations))
+        bars = ax.bar(x_positions, avg_values, yerr=std_values,
+                     color=bar_colors, alpha=0.7, capsize=5,
+                     edgecolor='black', linewidth=1.5)
+        
+        # Mettre en évidence la meilleure configuration
+        bars[best_idx].set_edgecolor('gold')
+        bars[best_idx].set_linewidth(3)
+        bars[best_idx].set_alpha(1.0)
+        
+        ax.text(best_idx, avg_values[best_idx] + std_values[best_idx], '⭐',
+                ha='center', va='bottom', fontsize=20, color='gold')
+        
+        # Background coloré par stage
+        self._add_stage_backgrounds(ax, stages, stage_colors)
+        
+        # Ligne de tendance
+        if len(avg_values) >= 3:
+            from scipy.ndimage import uniform_filter1d
+            smoothed = uniform_filter1d(avg_values, size=min(5, len(avg_values)), mode='nearest')
+            ax.plot(x_positions, smoothed, 'r--', linewidth=2, alpha=0.6, label='Tendance')
+        
+        # Configuration des axes
+        ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('% Chaleur Totale (NCA / Référence)', fontsize=12, fontweight='bold')
+        ax.set_title('Température: Conservation de l\'Énergie Thermique\n(error bars = écart-type)',
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
+        
+        # Ligne de référence à 100% (conservation parfaite)
+        ax.axhline(y=100, color='green', linestyle='--', linewidth=1.5, alpha=0.7, label='Conservation parfaite (100%)')
+        
+        ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # Légende
+        legend_elements = self._create_stage_legend(stages, stage_colors, len(avg_values) >= 3, add_perfection=True)
+        ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
+        
+        # Annotations
+        best_config = configurations[best_idx]
+        deviation = abs(best_config['avg_temp_heat_ratio'] - 100.0)
+        textstr = f"🏆 Meilleure config:\n{best_config['label']}\nRatio: {best_config['avg_temp_heat_ratio']:.2f}% ± {best_config['std_temp_heat_ratio']:.2f}%\nDéviation: {deviation:.2f}%"
+        props = dict(boxstyle='round', facecolor='lightyellow', alpha=0.8, edgecolor='gold', linewidth=2)
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        
+        plt.tight_layout()
+        
+        output_path = Path(CONFIG.OUTPUT_DIR) / "evaluation_performances_temp_heat_ratio.png"
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Graphique température (ratio chaleur) sauvegardé: {output_path.name}")
+        print(f"   🏆 Meilleure: {best_config['label']} avec {best_config['avg_temp_heat_ratio']:.2f}% (déviation: {deviation:.2f}%)")
+    
+    
+    def _plot_obstacle_correct_cells_comparison(self, configurations):
+        # type: (List[Dict]) -> None
+        """Graphique du % de cases correctes pour les obstacles"""
+        
+        labels = [cfg['label'] for cfg in configurations]
+        avg_values = [cfg['avg_obstacle_correct_pct'] for cfg in configurations]
+        std_values = [cfg['std_obstacle_correct_pct'] for cfg in configurations]
+        stages = [cfg['stage'] for cfg in configurations]
+        
+        # Filtrer les configurations sans données
+        if all(v == 0.0 for v in avg_values):
+            print(f"⚠️ Aucune donnée disponible pour le graphique obstacles (cases correctes)")
+            return
+        
+        # Trouver la meilleure configuration (plus grand %)
+        best_idx = avg_values.index(max(avg_values))
+        
+        fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
+        
+        # Récupérer les couleurs des stages
+        stage_colors = {}
+        for stage in STAGE_MANAGER.get_stages():
+            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        
+        bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
+        
+        # Tracer les barres
+        x_positions = range(len(configurations))
+        bars = ax.bar(x_positions, avg_values, yerr=std_values,
+                     color=bar_colors, alpha=0.7, capsize=5,
+                     edgecolor='black', linewidth=1.5)
+        
+        # Mettre en évidence la meilleure configuration
+        bars[best_idx].set_edgecolor('gold')
+        bars[best_idx].set_linewidth(3)
+        bars[best_idx].set_alpha(1.0)
+        
+        ax.text(best_idx, avg_values[best_idx] + std_values[best_idx], '⭐',
+                ha='center', va='bottom', fontsize=20, color='gold')
+        
+        # Background coloré par stage
+        self._add_stage_backgrounds(ax, stages, stage_colors)
+        
+        # Ligne de tendance
+        if len(avg_values) >= 3:
+            from scipy.ndimage import uniform_filter1d
+            smoothed = uniform_filter1d(avg_values, size=min(5, len(avg_values)), mode='nearest')
+            ax.plot(x_positions, smoothed, 'r--', linewidth=2, alpha=0.6, label='Tendance')
+        
+        # Configuration des axes
+        ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
+        ax.set_ylabel('% Cases Correctes (Obstacle/Vide)', fontsize=12, fontweight='bold')
+        ax.set_title('Obstacles: Précision de Classification\n(error bars = écart-type)',
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=9)
+        
+        # Ligne de référence à 100%
+        ax.axhline(y=100, color='green', linestyle='--', linewidth=1, alpha=0.5, label='Perfection (100%)')
+        
+        # Limiter l'axe Y
+        ax.set_ylim(0, min(105, max(avg_values) + max(std_values) + 5))
+        
+        ax.grid(True, axis='y', alpha=0.3, linestyle='-', linewidth=0.5)
+        ax.set_axisbelow(True)
+        
+        # Légende
+        legend_elements = self._create_stage_legend(stages, stage_colors, len(avg_values) >= 3, add_perfection=True)
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=10)
+        
+        # Annotations
+        best_config = configurations[best_idx]
+        textstr = f"🏆 Meilleure config:\n{best_config['label']}\nPrécision: {best_config['avg_obstacle_correct_pct']:.2f}% ± {best_config['std_obstacle_correct_pct']:.2f}%"
+        props = dict(boxstyle='round', facecolor='lightcyan', alpha=0.8, edgecolor='gold', linewidth=2)
+        ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
+                verticalalignment='top', bbox=props)
+        
+        plt.tight_layout()
+        
+        output_path = Path(CONFIG.OUTPUT_DIR) / "evaluation_performances_obstacle_correct_cells.png"
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"✅ Graphique obstacles (cases correctes) sauvegardé: {output_path.name}")
+        print(f"   🏆 Meilleure: {best_config['label']} avec {best_config['avg_obstacle_correct_pct']:.2f}%")
+    
+    
+    @staticmethod
+    def _add_stage_backgrounds(ax, stages, stage_colors):
+        # type: (Any, List[int], Dict[int, str]) -> None
+        """Ajoute des zones de background colorées par stage avec séparateurs"""
+        current_stage = stages[0]
+        stage_start = 0
+        
+        for i in range(1, len(stages) + 1):
+            if i == len(stages) or stages[i] != current_stage:
+                # Fin d'une zone de stage
+                stage_end = i
+                ax.axvspan(stage_start - 0.5, stage_end - 0.5,
+                          alpha=0.15, color=stage_colors.get(current_stage, 'gray'),
+                          zorder=0)
+                
+                # Ligne de séparation
+                if i < len(stages):
+                    ax.axvline(x=i - 0.5, color='black', linestyle='--',
+                              linewidth=2, alpha=0.5)
+                
+                # Préparer pour le prochain stage
+                if i < len(stages):
+                    current_stage = stages[i]
+                    stage_start = i
+    
+    
+    @staticmethod
+    def _create_stage_legend(stages, stage_colors, has_trend, add_perfection=False):
+        # type: (List[int], Dict[int, str], bool, bool) -> List
+        """Crée les éléments de légende pour les stages"""
+        from matplotlib.patches import Patch
+        from matplotlib.lines import Line2D
+        
+        legend_elements = []
+        
+        # Légende des stages
+        for stage in sorted(set(stages)):
+            legend_elements.append(
+                Patch(facecolor=stage_colors.get(stage, 'gray'),
+                     alpha=0.7, edgecolor='black',
+                     label=f'Stage {stage}')
+            )
+        
+        # Ligne de tendance si applicable
+        if has_trend:
+            legend_elements.append(
+                Line2D([0], [0], color='r', linestyle='--', linewidth=2,
+                      alpha=0.6, label='Tendance')
+            )
+        
+        # Ligne de perfection si applicable
+        if add_perfection:
+            legend_elements.append(
+                Line2D([0], [0], color='green', linestyle='--', linewidth=1.5,
+                      alpha=0.7, label='Perfection (100%)')
+            )
+        
+        return legend_elements
 _visualizer = None
 
 
