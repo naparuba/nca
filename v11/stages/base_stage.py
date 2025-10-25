@@ -13,9 +13,10 @@ from torch.nn import functional as F
 class REALITY_LAYER:
     TEMPERATURE = 0
     OBSTACLE = 1
+    HEAT_SOURCES = 2
 
 
-ALL_REALITY_LAYERS = [REALITY_LAYER.TEMPERATURE, REALITY_LAYER.OBSTACLE]
+ALL_REALITY_LAYERS = [REALITY_LAYER.TEMPERATURE, REALITY_LAYER.OBSTACLE, REALITY_LAYER.HEAT_SOURCES]
 
 
 class BaseStage(ABC):
@@ -209,10 +210,12 @@ class BaseStage(ABC):
         grid[REALITY_LAYER.TEMPERATURE, i0, j0] = CONFIG.SOURCE_INTENSITY  # force la source dans la chaleur
         # et on set les obstacles
         grid[REALITY_LAYER.OBSTACLE, obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE
-        # ou grid[REALITY_LAYER.OBSTACLE, :, :] = obstacle_mask.float() ?
         
+        # GEstio nd'une seule source pour l'instant
         source_mask = torch.zeros_like(grid[REALITY_LAYER.TEMPERATURE], dtype=torch.bool)
         source_mask[i0, j0] = True
+        
+        grid[REALITY_LAYER.HEAT_SOURCES, source_mask] = CONFIG.SOURCE_INTENSITY  # couche des sources
         
         # S'assurer que la source n'est pas dans un obstacle
         if obstacle_mask[i0, j0]:
@@ -229,6 +232,7 @@ class BaseStage(ABC):
     
     
     # Un pas de diffusion de chaleur avec obstacles
+    # NOTE: on ne diffuse que les températures, les obstacles restent fixes, les sources aussi
     def _play_diffusion_step(self, grid, source_mask, obstacle_mask):
         # type: (torch.Tensor, torch.Tensor, torch.Tensor) -> torch.Tensor
         
@@ -257,5 +261,6 @@ class BaseStage(ABC):
         new_grid[REALITY_LAYER.TEMPERATURE][new_grid[REALITY_LAYER.TEMPERATURE] < threshold] = 0.0
         
         # La couche obstacles (REALITY_LAYER.OBSTACLE) reste inchangée (les obstacles ne bougent pas)
+        # Pareil pour les sources (REALITY_LAYER.HEAT_SOURCES)
         
         return new_grid
