@@ -1,6 +1,6 @@
+import json
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
-import json
 
 import matplotlib.animation as animation
 import numpy as np
@@ -22,6 +22,7 @@ class ProgressiveVisualizer:
     Système de visualisation avancé pour l'apprentissage modulaire.
     Génère des animations et graphiques comparatifs par étape.
     """
+    
     
     def __init__(self):
         self._loss_fn = get_MSELoss()
@@ -89,7 +90,7 @@ class ProgressiveVisualizer:
         
         total_loss = torch.tensor(0.0, device=CONFIG.DEVICE)
         
-        losses = [] # type: List[float]
+        losses = []  # type: List[float]
         
         # Nouvelles métriques par couche
         temp_correct_cells_pct = []  # type: List[float]  # % de cases correctes (vide/chaleur) pour température
@@ -120,6 +121,7 @@ class ProgressiveVisualizer:
                 
                 # Pourcentage de cases correctement classifiées
                 correct_temp_cells = (target_has_heat == pred_has_heat).float().mean().item()
+                # print('CORRECT CELLS TEMP STEP:', target_has_heat == pred_has_heat,target_has_heat.size(), pred_has_heat.size())
                 temp_correct_cells_pct.append(correct_temp_cells * 100.0)  # En pourcentage
                 
                 # 2. Rapport de chaleur totale (somme des chaleurs)
@@ -169,6 +171,7 @@ class ProgressiveVisualizer:
         # === CALCUL DES STATISTIQUES POUR LES NOUVELLES MÉTRIQUES (SANS FILTRAGE DES OUTLIERS) ===
         
         # Température - % cases correctes
+        # print('CORRECT CELLS TEMP:', temp_correct_cells_pct, 'lenght', len(temp_correct_cells_pct))
         avg_temp_correct_pct = np.mean(temp_correct_cells_pct)
         std_temp_correct_pct = np.std(temp_correct_cells_pct)
         
@@ -182,32 +185,34 @@ class ProgressiveVisualizer:
         
         print(f"✅ Évaluation étape {stage_nb} terminée.")
         print(f"   Total loss (all): {total_loss.item():.6f}")
-        print(f"   Données filtrées: {n_filtered}/{n_total} ({n_filtered/n_total*100:.1f}% conservés)")
+        print(f"   Données filtrées: {n_filtered}/{n_total} ({n_filtered / n_total * 100:.1f}% conservés)")
         print(f"   Outliers retirés: {lower_cutoff_idx} (low) + {n_total - upper_cutoff_idx} (high)")
         print(f"   Avg Loss (80% centraux): {avg_losses:.6f}")
         print(f"   Std Dev (80% centraux): {std_dev_losses:.6f}")
         
         # Sauvegarde des performances dans le fichier JSON
         self._save_evaluation_performance(
-            stage_nb=stage_nb,
-            n_layers=CONFIG.N_LAYERS,
-            hidden_size=CONFIG.HIDDEN_SIZE,
-            nb_epochs_trained=CONFIG.NB_EPOCHS_BY_STAGE,
-            total_loss=total_loss.item(),
-            avg_loss=avg_losses,
-            std_dev=std_dev_losses,
-            nb_evaluations=CONFIG.NB_EPOCHS_FOR_EVALUATION,
-            # Nouvelles métriques
-            avg_temp_correct_pct=avg_temp_correct_pct,
-            std_temp_correct_pct=std_temp_correct_pct,
-            avg_temp_heat_ratio=avg_temp_heat_ratio,
-            std_temp_heat_ratio=std_temp_heat_ratio,
-            avg_obstacle_correct_pct=avg_obstacle_correct_pct,
-            std_obstacle_correct_pct=std_obstacle_correct_pct
+                stage_nb=stage_nb,
+                n_layers=CONFIG.N_LAYERS,
+                hidden_size=CONFIG.HIDDEN_SIZE,
+                nb_epochs_trained=CONFIG.NB_EPOCHS_BY_STAGE,
+                total_loss=total_loss.item(),
+                avg_loss=avg_losses,
+                std_dev=std_dev_losses,
+                nb_evaluations=CONFIG.NB_EPOCHS_FOR_EVALUATION,
+                # Nouvelles métriques
+                avg_temp_correct_pct=avg_temp_correct_pct,
+                std_temp_correct_pct=std_temp_correct_pct,
+                avg_temp_heat_ratio=avg_temp_heat_ratio,
+                std_temp_heat_ratio=std_temp_heat_ratio,
+                avg_obstacle_correct_pct=avg_obstacle_correct_pct,
+                std_obstacle_correct_pct=std_obstacle_correct_pct
         )
     
     
-    def _save_evaluation_performance(self, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev, nb_evaluations, avg_temp_correct_pct, std_temp_correct_pct, avg_temp_heat_ratio, std_temp_heat_ratio, avg_obstacle_correct_pct, std_obstacle_correct_pct):
+    def _save_evaluation_performance(self, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev, nb_evaluations,
+                                     avg_temp_correct_pct, std_temp_correct_pct, avg_temp_heat_ratio, std_temp_heat_ratio, avg_obstacle_correct_pct,
+                                     std_obstacle_correct_pct):
         # type: (int, int, int, int, float, float, float, int, float, float, float, float, float, float) -> None
         """
         Sauvegarde les performances d'évaluation dans un fichier JSON structuré.
@@ -267,18 +272,18 @@ class ProgressiveVisualizer:
         
         # Mettre à jour les performances pour cette configuration
         data[stage_key][layers_key][hidden_key][epochs_key] = {
-            "total_loss": total_loss,
-            "avg_loss": avg_loss,
-            "std_dev": std_dev,
-            "nb_evaluations": nb_evaluations,
+            "total_loss":       total_loss,
+            "avg_loss":         avg_loss,
+            "std_dev":          std_dev,
+            "nb_evaluations":   nb_evaluations,
             "metrics_by_layer": {
                 "temperature": {
                     "avg_correct_cells_pct": avg_temp_correct_pct,
                     "std_correct_cells_pct": std_temp_correct_pct,
-                    "avg_heat_ratio_pct": avg_temp_heat_ratio,
-                    "std_heat_ratio_pct": std_temp_heat_ratio
+                    "avg_heat_ratio_pct":    avg_temp_heat_ratio,
+                    "std_heat_ratio_pct":    std_temp_heat_ratio
                 },
-                "obstacles": {
+                "obstacles":   {
                     "avg_correct_cells_pct": avg_obstacle_correct_pct,
                     "std_correct_cells_pct": std_obstacle_correct_pct
                 }
@@ -444,13 +449,13 @@ class ProgressiveVisualizer:
                         metrics = data[stage_key][n_layers][hidden_size][nb_epochs]
                         
                         configurations.append({
-                            'stage': stage_nb,
-                            'n_layers': int(n_layers),
+                            'stage':       stage_nb,
+                            'n_layers':    int(n_layers),
                             'hidden_size': int(hidden_size),
-                            'nb_epochs': int(nb_epochs),
-                            'avg_loss': metrics['avg_loss'],
-                            'std_dev': metrics['std_dev'],
-                            'label': f"S{stage_nb}_L{n_layers}_H{hidden_size}_E{nb_epochs}"
+                            'nb_epochs':   int(nb_epochs),
+                            'avg_loss':    metrics['avg_loss'],
+                            'std_dev':     metrics['std_dev'],
+                            'label':       f"S{stage_nb}_L{n_layers}_H{hidden_size}_E{nb_epochs}"
                         })
         
         if not configurations:
@@ -480,8 +485,8 @@ class ProgressiveVisualizer:
         # Tracer les barres avec error bars
         x_positions = range(len(configurations))
         bars = ax.bar(x_positions, avg_losses, yerr=std_devs,
-                     color=bar_colors, alpha=0.7, capsize=5,
-                     edgecolor='black', linewidth=1.5)
+                      color=bar_colors, alpha=0.7, capsize=5,
+                      edgecolor='black', linewidth=1.5)
         
         # Mettre en évidence la meilleure configuration
         bars[best_idx].set_edgecolor('gold')
@@ -501,13 +506,13 @@ class ProgressiveVisualizer:
                 # Fin d'une zone de stage
                 stage_end = i
                 ax.axvspan(stage_start - 0.5, stage_end - 0.5,
-                          alpha=0.15, color=stage_colors.get(current_stage, 'gray'),
-                          zorder=0)
+                           alpha=0.15, color=stage_colors.get(current_stage, 'gray'),
+                           zorder=0)
                 
                 # Ligne de séparation
                 if i < len(stages):
                     ax.axvline(x=i - 0.5, color='black', linestyle='--',
-                              linewidth=2, alpha=0.5)
+                               linewidth=2, alpha=0.5)
                 
                 # Préparer pour le prochain stage
                 if i < len(stages):
@@ -519,13 +524,13 @@ class ProgressiveVisualizer:
             from scipy.ndimage import uniform_filter1d
             smoothed = uniform_filter1d(avg_losses, size=min(5, len(avg_losses)), mode='nearest')
             ax.plot(x_positions, smoothed, 'r--', linewidth=2,
-                   alpha=0.6, label='Tendance (moyenne mobile)')
+                    alpha=0.6, label='Tendance (moyenne mobile)')
         
         # Configuration des axes
         ax.set_xlabel('Configuration (Stage_Layers_HiddenSize_Epochs)', fontsize=12, fontweight='bold')
         ax.set_ylabel('Perte Moyenne (avg_loss)', fontsize=12, fontweight='bold')
         ax.set_title('Comparaison des Performances par Configuration\n(error bars = écart-type)',
-                    fontsize=14, fontweight='bold', pad=20)
+                     fontsize=14, fontweight='bold', pad=20)
         
         # Labels en X avec rotation
         ax.set_xticks(x_positions)
@@ -545,16 +550,16 @@ class ProgressiveVisualizer:
         legend_elements = []
         for stage in sorted(set(stages)):
             legend_elements.append(
-                Patch(facecolor=stage_colors.get(stage, 'gray'),
-                     alpha=0.7, edgecolor='black',
-                     label=f'Stage {stage}')
+                    Patch(facecolor=stage_colors.get(stage, 'gray'),
+                          alpha=0.7, edgecolor='black',
+                          label=f'Stage {stage}')
             )
         
         if len(avg_losses) >= 3:
             from matplotlib.lines import Line2D
             legend_elements.append(
-                Line2D([0], [0], color='r', linestyle='--', linewidth=2,
-                      alpha=0.6, label='Tendance')
+                    Line2D([0], [0], color='r', linestyle='--', linewidth=2,
+                           alpha=0.6, label='Tendance')
             )
         
         ax.legend(handles=legend_elements, loc='upper right', fontsize=10)
