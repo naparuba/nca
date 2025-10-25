@@ -91,6 +91,11 @@ class ProgressiveVisualizer:
         
         losses = [] # type: List[float]
         
+        # Nouvelles métriques par couche
+        temp_correct_cells_pct = []  # type: List[float]  # % de cases correctes (vide/chaleur) pour température
+        temp_heat_ratio = []  # type: List[float]  # Rapport de chaleur totale (sum NCA / sum reference)
+        obstacle_correct_cells_pct = []  # type: List[float]  # % de cases correctes pour obstacles
+        
         for nb_evaluation in range(CONFIG.NB_EPOCHS_FOR_EVALUATION):
             reality_worlds, nca_temporal_sequence = self.generate_and_run_one_sequence(model, stage)
             
@@ -100,6 +105,48 @@ class ProgressiveVisualizer:
                 step_loss = self._loss_fn(grid_pred, target)
                 losses.append(step_loss.item())
                 total_loss = total_loss + step_loss
+                
+                # === MÉTRIQUES TEMPÉRATURE ===
+                
+                # 1. Pourcentage de cases correctes (vide vs chaleur)
+                # On considère qu'une case est "vide" si < 1% de SOURCE_INTENSITY, sinon elle a de la "chaleur"
+                threshold = CONFIG.SOURCE_INTENSITY * 0.01
+                target_temp = target[REALITY_LAYER.TEMPERATURE]
+                pred_temp = grid_pred[REALITY_LAYER.TEMPERATURE]
+                
+                # Classification binaire : vide (0) ou chaleur (1)
+                target_has_heat = (target_temp >= threshold).float()
+                pred_has_heat = (pred_temp >= threshold).float()
+                
+                # Pourcentage de cases correctement classifiées
+                correct_temp_cells = (target_has_heat == pred_has_heat).float().mean().item()
+                temp_correct_cells_pct.append(correct_temp_cells * 100.0)  # En pourcentage
+                
+                # 2. Rapport de chaleur totale (somme des chaleurs)
+                # Évite la division par zéro : si la référence est vide, on met un ratio à 0
+                sum_target_heat = target_temp.sum().item()
+                sum_pred_heat = pred_temp.sum().item()
+                if sum_target_heat > 0:
+                    heat_ratio = sum_pred_heat / sum_target_heat
+                else:
+                    heat_ratio = 0.0
+                temp_heat_ratio.append(heat_ratio * 100.0)  # En pourcentage
+                
+                # === MÉTRIQUES OBSTACLES ===
+                
+                # Pourcentage de cases avec le bon état d'obstacle
+                # Les obstacles sont soit 0 (pas d'obstacle) soit OBSTACLE_FULL_BLOCK_VALUE (obstacle)
+                target_obstacles = target[REALITY_LAYER.OBSTACLE]
+                pred_obstacles = grid_pred[REALITY_LAYER.OBSTACLE]
+                
+                # On considère qu'un obstacle est présent si >= 50% de OBSTACLE_FULL_BLOCK_VALUE
+                obstacle_threshold = CONFIG.OBSTACLE_FULL_BLOCK_VALUE * 0.5
+                target_has_obstacle = (target_obstacles >= obstacle_threshold).float()
+                pred_has_obstacle = (pred_obstacles >= obstacle_threshold).float()
+                
+                # Pourcentage de cases correctement classifiées
+                correct_obstacle_cells = (target_has_obstacle == pred_has_obstacle).float().mean().item()
+                obstacle_correct_cells_pct.append(correct_obstacle_cells * 100.0)  # En pourcentage
         
         # Filtrage des outliers : on garde les 80% centraux (retire 10% top et 10% bottom)
         # Tri des losses pour identifier les percentiles
@@ -119,6 +166,20 @@ class ProgressiveVisualizer:
         avg_losses = sum(filtered_losses) / n_filtered if n_filtered > 0 else 0.0
         std_dev_losses = np.std(filtered_losses) if n_filtered > 0 else 0.0
         
+        # === CALCUL DES STATISTIQUES POUR LES NOUVELLES MÉTRIQUES (SANS FILTRAGE DES OUTLIERS) ===
+        
+        # Température - % cases correctes
+        avg_temp_correct_pct = np.mean(temp_correct_cells_pct)
+        std_temp_correct_pct = np.std(temp_correct_cells_pct)
+        
+        # Température - Rapport chaleur totale
+        avg_temp_heat_ratio = np.mean(temp_heat_ratio)
+        std_temp_heat_ratio = np.std(temp_heat_ratio)
+        
+        # Obstacles - % cases correctes
+        avg_obstacle_correct_pct = np.mean(obstacle_correct_cells_pct)
+        std_obstacle_correct_pct = np.std(obstacle_correct_cells_pct)
+        
         print(f"✅ Évaluation étape {stage_nb} terminée.")
         print(f"   Total loss (all): {total_loss.item():.6f}")
         print(f"   Données filtrées: {n_filtered}/{n_total} ({n_filtered/n_total*100:.1f}% conservés)")
@@ -135,12 +196,19 @@ class ProgressiveVisualizer:
             total_loss=total_loss.item(),
             avg_loss=avg_losses,
             std_dev=std_dev_losses,
-            nb_evaluations=CONFIG.NB_EPOCHS_FOR_EVALUATION
+            nb_evaluations=CONFIG.NB_EPOCHS_FOR_EVALUATION,
+            # Nouvelles métriques
+            avg_temp_correct_pct=avg_temp_correct_pct,
+            std_temp_correct_pct=std_temp_correct_pct,
+            avg_temp_heat_ratio=avg_temp_heat_ratio,
+            std_temp_heat_ratio=std_temp_heat_ratio,
+            avg_obstacle_correct_pct=avg_obstacle_correct_pct,
+            std_obstacle_correct_pct=std_obstacle_correct_pct
         )
     
     
-    def _save_evaluation_performance(self, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev, nb_evaluations):
-        # type: (int, int, int, int, float, float, float, int) -> None
+    def _save_evaluation_performance(self, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev, nb_evaluations, avg_temp_correct_pct, std_temp_correct_pct, avg_temp_heat_ratio, std_temp_heat_ratio, avg_obstacle_correct_pct, std_obstacle_correct_pct):
+        # type: (int, int, int, int, float, float, float, int, float, float, float, float, float, float) -> None
         """
         Sauvegarde les performances d'évaluation dans un fichier JSON structuré.
         
@@ -153,7 +221,19 @@ class ProgressiveVisualizer:
                             "total_loss": 0.123,
                             "avg_loss": 0.0045,
                             "std_dev": 0.001,
-                            "nb_evaluations": 50
+                            "nb_evaluations": 50,
+                            "metrics_by_layer": {
+                                "temperature": {
+                                    "avg_correct_cells_pct": 95.5,
+                                    "std_correct_cells_pct": 2.3,
+                                    "avg_heat_ratio_pct": 98.2,
+                                    "std_heat_ratio_pct": 1.5
+                                },
+                                "obstacles": {
+                                    "avg_correct_cells_pct": 99.8,
+                                    "std_correct_cells_pct": 0.2
+                                }
+                            }
                         }
                     }
                 }
@@ -190,7 +270,19 @@ class ProgressiveVisualizer:
             "total_loss": total_loss,
             "avg_loss": avg_loss,
             "std_dev": std_dev,
-            "nb_evaluations": nb_evaluations
+            "nb_evaluations": nb_evaluations,
+            "metrics_by_layer": {
+                "temperature": {
+                    "avg_correct_cells_pct": avg_temp_correct_pct,
+                    "std_correct_cells_pct": std_temp_correct_pct,
+                    "avg_heat_ratio_pct": avg_temp_heat_ratio,
+                    "std_heat_ratio_pct": std_temp_heat_ratio
+                },
+                "obstacles": {
+                    "avg_correct_cells_pct": avg_obstacle_correct_pct,
+                    "std_correct_cells_pct": std_obstacle_correct_pct
+                }
+            }
         }
         
         # Sauvegarder le fichier JSON avec indentation pour lisibilité
