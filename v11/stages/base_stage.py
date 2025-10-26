@@ -9,6 +9,9 @@ from reality_world import RealityWorld
 from simulation_temporal_sequence import SimulationTemporalSequence
 from torch.nn import functional as F
 
+from nca_model import NCA
+from torched import get_MSELoss
+
 
 class REALITY_LAYER:
     TEMPERATURE = 0
@@ -44,6 +47,8 @@ class BaseStage(ABC):
         # step player
         self._kernel_avg_3x3 = torch.ones((1, 1, 3, 3), device=CONFIG.DEVICE) / 9.0  # Average 3x3
     
+    
+        self._loss_fn = get_MSELoss()
     
     def get_name(self):
         return self.NAME
@@ -206,7 +211,8 @@ class BaseStage(ABC):
         obstacle_mask = self.generate_obstacles(size, (i0, j0))
         
         # Initialisation
-        grid = torch.zeros((len(ALL_REALITY_LAYERS), size, size), device=CONFIG.DEVICE)  # 2 layers: temperature, obstacle sur grille 16x16
+        grid = torch.zeros((len(ALL_REALITY_LAYERS), size, size), device=CONFIG.DEVICE)  # 3 layers: temperature, obstacle sur grille 16x16, source 16x16
+        
         grid[REALITY_LAYER.TEMPERATURE, i0, j0] = CONFIG.SOURCE_INTENSITY  # force la source dans la chaleur
         # et on set les obstacles
         grid[REALITY_LAYER.OBSTACLE, obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE
@@ -264,3 +270,87 @@ class BaseStage(ABC):
         # Pareil pour les sources (REALITY_LAYER.HEAT_SOURCES)
         
         return new_grid
+    
+    
+    def _train_step(self, model, sequence, optimizer):
+        # type: (NCA, SimulationTemporalSequence, torch.optim.Optimizer) -> float
+        
+        """
+        Un pas d'entraînement adapté à l'étape courante.
+
+        Le modèle apprend à respecter les contraintes des obstacles via une pénalité forte
+        dans la fonction de perte, plutôt que par forçage explicite après prédiction.
+
+        Args:
+            sequence: Sequence d'entraînement
+        Returns:
+            Perte pour ce pas
+        """
+        
+        optimizer.zero_grad()
+        
+        reality_worlds = sequence.get_reality_worlds()
+        source_mask = sequence.get_source_mask()
+        obstacle_mask = sequence.get_obstacle_mask()
+        
+        # Initialisation
+        grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
+        
+        # TODO: bruiter la température initiale?
+        # g = torch.Generator(device=DEVICE)
+        # g.manual_seed(CONFIG.SEED)
+        # grid_pred[REALITY_LAYER.TEMPERATURE] = torch.rand_like(
+        #        grid_pred[REALITY_LAYER.TEMPERATURE], device=DEVICE
+        # ) * 0.05  # Petite valeur initiale aléatoire pour la température
+        
+        # grid_pred[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY  # Set Les sources, on a une chaleur dès le départ  # TODO: need to init or not?
+        grid_pred[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # Set les obstacles
+        grid_pred[REALITY_LAYER.HEAT_SOURCES][source_mask] = CONFIG.SOURCE_INTENSITY  # Set les sources
+        
+        total_loss = torch.tensor(0.0, device=CONFIG.DEVICE)
+        
+        # Déroulement temporel
+        for t_step in range(CONFIG.NCA_STEPS):
+            target = reality_worlds[t_step + 1].get_as_tensor()
+            grid_pred = model.run_step(grid_pred)  # , source_mask)
+            
+            # Perte standard sur la prédiction globale de la température
+            step_loss = self._loss_fn(grid_pred, target)
+            
+            total_loss = total_loss + step_loss
+        
+        avg_loss = total_loss / CONFIG.NCA_STEPS
+        
+        # combined_loss = avg_loss
+        combined_loss_float = avg_loss.item()
+        
+        # print(f' avg_loss: {avg_loss.item():.6f}, '
+        #        f' obstacle_penalty: {avg_obstacle_penalty.item():.6f}, '
+        #        f' cold_zone_penalty: {avg_cold_zone_penalty.item():.6f}, '
+        #        f' combined_loss: {combined_loss_float:.6f}')
+        
+        # Backpropagation avec clipping
+        avg_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        optimizer.step()
+        
+        if combined_loss_float == float('nan'):
+            raise ValueError("NaN loss encountered during training step.")
+        
+        # On retourne la perte combinée pour le monitoring
+        return combined_loss_float
+
+
+    def train_full_sequence(self, model, optimizer):
+        
+        epoch_losses = []  # type: List[float]
+        
+        # Entraînement par batch
+        for _ in range(CONFIG.BATCH_SIZE):
+            sequence = self.get_sequences_for_training()
+            loss = self._train_step(model, sequence, optimizer)  # type: float
+            epoch_losses.append(loss)
+            
+        return epoch_losses
+        

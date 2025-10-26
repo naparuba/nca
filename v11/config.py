@@ -15,7 +15,7 @@ class ModularConfig:
         self.VISUALIZATION_SEED = 3333
         
         self.NB_EPOCHS_BY_STAGE = 50#200
-        self.NB_EPOCHS_FOR_EVALUATION = 50
+        self.NB_EPOCHS_FOR_EVALUATION = 250
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
         
@@ -27,7 +27,7 @@ class ModularConfig:
         # Paramètres d'entraînement modulaire
         self.NCA_STEPS = 20
         self.LEARNING_RATE = 1e-3
-        self.BATCH_SIZE = 4
+        self.BATCH_SIZE = 1
         
         # Paramètres de visualisation
         self.POSTVIS_STEPS = 50

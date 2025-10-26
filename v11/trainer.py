@@ -1,14 +1,13 @@
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 
-from config import CONFIG, DEVICE
+from config import CONFIG
 from stage_manager import STAGE_MANAGER
-from stages.base_stage import REALITY_LAYER
-from torched import AdamW, get_MSELoss
+from torched import AdamW
 from visualizer import get_visualizer
 
 if TYPE_CHECKING:
@@ -30,69 +29,6 @@ class Trainer:
         
         # Optimiseur et planificateur
         self._optimizer = AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
-        self._loss_fn = get_MSELoss()
-    
-    
-    def _train_step(self, sequence):
-        # type: (SimulationTemporalSequence) -> float
-        
-        """
-        Un pas d'entraînement adapté à l'étape courante.
-        
-        Le modèle apprend à respecter les contraintes des obstacles via une pénalité forte
-        dans la fonction de perte, plutôt que par forçage explicite après prédiction.
-
-        Args:
-            sequence: Sequence d'entraînement
-        Returns:
-            Perte pour ce pas
-        """
-        
-        self._optimizer.zero_grad()
-        
-        reality_worlds = sequence.get_reality_worlds()
-        source_mask = sequence.get_source_mask()
-        obstacle_mask = sequence.get_obstacle_mask()
-        
-        # Initialisation
-        grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
-        # grid_pred[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY  # Set Les sources, on a une chaleur dès le départ  # TODO: need to init or not?
-        grid_pred[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # Set les obstacles
-        grid_pred[REALITY_LAYER.HEAT_SOURCES][source_mask] = CONFIG.SOURCE_INTENSITY  # Set les sources
-        
-        total_loss = torch.tensor(0.0, device=DEVICE)
-        
-        # Déroulement temporel
-        for t_step in range(CONFIG.NCA_STEPS):
-            target = reality_worlds[t_step + 1].get_as_tensor()
-            grid_pred = self._model.run_step(grid_pred)  # , source_mask)
-            
-            # Perte standard sur la prédiction globale de la température
-            step_loss = self._loss_fn(grid_pred, target)
-            
-            total_loss = total_loss + step_loss
-        
-        avg_loss = total_loss / CONFIG.NCA_STEPS
-        
-        # combined_loss = avg_loss
-        combined_loss_float = avg_loss.item()
-        
-        # print(f' avg_loss: {avg_loss.item():.6f}, '
-        #        f' obstacle_penalty: {avg_obstacle_penalty.item():.6f}, '
-        #        f' cold_zone_penalty: {avg_cold_zone_penalty.item():.6f}, '
-        #        f' combined_loss: {combined_loss_float:.6f}')
-        
-        # Backpropagation avec clipping
-        avg_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self._model.parameters(), max_norm=1.0)
-        
-        self._optimizer.step()
-        
-        if combined_loss_float == float('nan'):
-            raise ValueError("NaN loss encountered during training step.")
-        
-        # On retourne la perte combinée pour le monitoring
-        return combined_loss_float
     
     
     def _adjust_learning_rate(self, stage_nb, epoch_in_stage):
@@ -139,16 +75,12 @@ class Trainer:
         
         # Boucle d'entraînement de l'étape
         for epoch_in_stage in range(max_epochs):
-            epoch_losses = []  # type: List[float]
             
             # Ajustement du learning rate si curriculum activé
             self._adjust_learning_rate(stage_nb, epoch_in_stage)
             
             # Entraînement par batch
-            for _ in range(CONFIG.BATCH_SIZE):
-                sequence = stage.get_sequences_for_training()
-                loss = self._train_step(sequence)  # type: float
-                epoch_losses.append(loss)
+            epoch_losses = stage.train_full_sequence(self._model, self._optimizer)
             
             # Statistiques de l'époque
             avg_epoch_loss = np.mean(epoch_losses)
