@@ -1,16 +1,19 @@
 import json
 from abc import ABC
 from pathlib import Path
-from typing import Tuple, List
+from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 from config import CONFIG
 from reality_world import RealityWorld
 from simulation_temporal_sequence import SimulationTemporalSequence
 from torch.nn import functional as F
-
-from nca_model import NCA
 from torched import get_MSELoss
+
+if TYPE_CHECKING:
+    from typing import Tuple, List, Dict
+    from nca_model import NCA
 
 
 class REALITY_LAYER:
@@ -46,9 +49,9 @@ class BaseStage(ABC):
         
         # step player
         self._kernel_avg_3x3 = torch.ones((1, 1, 3, 3), device=CONFIG.DEVICE) / 9.0  # Average 3x3
-    
-    
+        
         self._loss_fn = get_MSELoss()
+    
     
     def get_name(self):
         return self.NAME
@@ -66,7 +69,7 @@ class BaseStage(ABC):
         self._stage_nb = stage_nb
     
     
-    def set_metrics(self, epochs_trained: int, loss_history: list, stage_lrs: list):
+    def _set_metrics(self, epochs_trained: int, loss_history: list, stage_lrs: list):
         self._metrics_epochs_trained = epochs_trained
         self._metrics_loss_history = loss_history
         self._metrics_stage_lrs = stage_lrs
@@ -76,7 +79,8 @@ class BaseStage(ABC):
         return self._stage_nb
     
     
-    def generate_obstacles(self, size: int, source_pos: Tuple[int, int]) -> torch.Tensor:
+    def generate_obstacles(self, size, source_pos):
+        # type: (int, Tuple[int, int]) -> torch.Tensor
         """
                 Génère un environnement d'obstacles adapté à l'étape courante.
 
@@ -111,17 +115,12 @@ class BaseStage(ABC):
         return self._metrics_loss_history
     
     
-    def get_metrics_epochs_trained(self):
-        return self._metrics_epochs_trained
-    
-    
     def get_metrics_lrs(self):
         return self._metrics_stage_lrs
     
     
-    def save_stage_checkpoint(self, model_state_dict, optimizer_state_dict):
-        # Type: (Dict, Dict) -> None
-        """Sauvegarde le checkpoint d'une étape."""
+    def _save_stage_checkpoint(self, model_state_dict, optimizer_state_dict):
+        # type: (Dict, Dict) -> None
         
         stage_dir = self._get_stage_dir()
         
@@ -145,16 +144,16 @@ class BaseStage(ABC):
         print(f"💾 Checkpoint étape {self.get_stage_nb()} sauvegardé: {stage_dir}")
     
     
+    # Récupère un échantillon pour l'étape spécifiée
     def get_sequences_for_training(self):
         # type: (BaseStage) -> SimulationTemporalSequence
-        """Récupère un échantillon pour l'étape spécifiée."""
-        stage_nb = self.get_stage_nb()
+        
         if not self._reality_temporal_sequences_for_training:
-            raise Exception("Le cache de séquences n'a pas été généré pour l'étape {stage_nb}.")
+            raise Exception(f"Le cache de séquences n'a pas été généré pour l'étape {self.get_stage_nb()}.")
         
         # Récupère l'échantillon courant et avance l'index
-        sequence = self._reality_temporal_sequences_for_training[
-            self._reality_temporal_sequences_for_training_current_indices]  # type: SimulationTemporalSequence
+        sequence = self._reality_temporal_sequences_for_training[self._reality_temporal_sequences_for_training_current_indices]
+        
         self._reality_temporal_sequences_for_training_current_indices = (self._reality_temporal_sequences_for_training_current_indices + 1) % len(
                 self._reality_temporal_sequences_for_training)
         
@@ -165,13 +164,8 @@ class BaseStage(ABC):
         cache_size = CONFIG.NB_EPOCHS_BY_STAGE
         print(f"🎯 Génération de {cache_size} séquences pour l'étape {self.get_stage_nb()}...", end='', flush=True)
         
-        # sequences = []  # :Type: List[Sequence]
         for i in range(cache_size):
-            if i % 50 == 0:
-                print(f"\r   Étape {self.get_stage_nb()}: {i}/{cache_size}                                 ", end='', flush=True)
-            
             simulation_temporal_sequence = self.generate_simulation_temporal_sequence(n_steps=CONFIG.NCA_STEPS, size=CONFIG.GRID_SIZE)
-            
             self._reality_temporal_sequences_for_training.append(simulation_temporal_sequence)
         
         print(f"\r✅ Cache étape {self.get_stage_nb()} créé ({cache_size} séquences)")
@@ -180,7 +174,6 @@ class BaseStage(ABC):
     def generate_reality_sequences_for_evaluation(self):
         print(f"Génération de {CONFIG.NB_EPOCHS_FOR_EVALUATION} séquences pour Evaluation de {self.get_stage_nb()}...", end='', flush=True)
         
-        # sequences = []  # :Type: List[Sequence]
         for i in range(CONFIG.NB_EPOCHS_FOR_EVALUATION):
             simulation_temporal_sequence = self.generate_simulation_temporal_sequence(n_steps=CONFIG.NCA_STEPS, size=CONFIG.GRID_SIZE)
             self._reality_temporal_sequences_for_evaluation.append(simulation_temporal_sequence)
@@ -188,6 +181,7 @@ class BaseStage(ABC):
     
     def get_sequence_for_evaluation(self):
         return self._reality_temporal_sequences_for_evaluation.pop(0)
+    
     
     def generate_simulation_temporal_sequence(self, n_steps, size):
         # type: (int, int) -> SimulationTemporalSequence
@@ -211,13 +205,14 @@ class BaseStage(ABC):
         obstacle_mask = self.generate_obstacles(size, (i0, j0))
         
         # Initialisation
-        grid = torch.zeros((len(ALL_REALITY_LAYERS), size, size), device=CONFIG.DEVICE)  # 3 layers: temperature, obstacle sur grille 16x16, source 16x16
+        # 3 layers: temperature, obstacle sur grille 16x16, source 16x16
+        grid = torch.zeros((len(ALL_REALITY_LAYERS), size, size), device=CONFIG.DEVICE)
         
         grid[REALITY_LAYER.TEMPERATURE, i0, j0] = CONFIG.SOURCE_INTENSITY  # force la source dans la chaleur
         # et on set les obstacles
         grid[REALITY_LAYER.OBSTACLE, obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE
         
-        # GEstio nd'une seule source pour l'instant
+        # TODO: Gestion d'une seule source pour l'instant
         source_mask = torch.zeros_like(grid[REALITY_LAYER.TEMPERATURE], dtype=torch.bool)
         source_mask[i0, j0] = True
         
@@ -324,11 +319,6 @@ class BaseStage(ABC):
         # combined_loss = avg_loss
         combined_loss_float = avg_loss.item()
         
-        # print(f' avg_loss: {avg_loss.item():.6f}, '
-        #        f' obstacle_penalty: {avg_obstacle_penalty.item():.6f}, '
-        #        f' cold_zone_penalty: {avg_cold_zone_penalty.item():.6f}, '
-        #        f' combined_loss: {combined_loss_float:.6f}')
-        
         # Backpropagation avec clipping
         avg_loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -340,9 +330,10 @@ class BaseStage(ABC):
         
         # On retourne la perte combinée pour le monitoring
         return combined_loss_float
-
-
-    def train_full_sequence(self, model, optimizer):
+    
+    
+    def _train_full_sequence(self, model, optimizer):
+        # type: (NCA, torch.optim.Optimizer) -> List[float]
         
         epoch_losses = []  # type: List[float]
         
@@ -351,6 +342,69 @@ class BaseStage(ABC):
             sequence = self.get_sequences_for_training()
             loss = self._train_step(model, sequence, optimizer)  # type: float
             epoch_losses.append(loss)
-            
-        return epoch_losses
         
+        return epoch_losses
+    
+    
+    # Ajuste le learning rate selon l'étape et la progression.
+    def _adjust_learning_rate(self, epoch_in_stage, optimizer):
+        # type: (int, torch.optim.Optimizer) -> None
+        
+        from stage_manager import STAGE_MANAGER
+        
+        base_lr = CONFIG.LEARNING_RATE
+        
+        # Réduction progressive par étape, from 1.0 -> 0.6
+        stage_lr = base_lr * (1.0 - ((self.get_stage_nb() - 1) / (len(STAGE_MANAGER.get_stages()) - 1)) * 0.4)
+        
+        # Décroissance cosine au sein de l'étape
+        cos_factor = 0.5 * (1 + np.cos(np.pi * epoch_in_stage / CONFIG.NB_EPOCHS_BY_STAGE))
+        final_lr = stage_lr * (0.1 + 0.9 * cos_factor)  # Ne descends pas sous 10% du LR de base
+        
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = final_lr
+    
+    
+    # Entraînement complet
+    def train(self, model, optimizer):
+        # type: (NCA, torch.optim.Optimizer) -> None
+        
+        max_epochs = CONFIG.NB_EPOCHS_BY_STAGE
+        stage_nb = self.get_stage_nb()
+        print(f"\n🎯 === ÉTAPE {stage_nb} - DÉBUT ===")
+        print(f"📋 {self.get_display_name()}")
+        print(f"⏱️  Maximum {max_epochs} époques")
+        
+        # Initialisation du cache pour cette étape
+        self.generate_reality_sequences_for_training()
+        
+        # Métriques de l'étape
+        stage_losses = []
+        stage_lrs = []
+        epoch_in_stage = 0
+        
+        # Boucle d'entraînement de l'étape
+        for epoch_in_stage in range(max_epochs):
+            
+            # Ajustement du learning rate si curriculum activé
+            self._adjust_learning_rate(epoch_in_stage, optimizer)
+            
+            # Entraînement par batch
+            epoch_losses = self._train_full_sequence(model, optimizer)
+            
+            # Statistiques de l'époque
+            avg_epoch_loss = np.mean(epoch_losses)
+            stage_losses.append(avg_epoch_loss)
+            current_lr = optimizer.param_groups[0]['lr']
+            stage_lrs.append(current_lr)
+            
+            # Affichage périodique
+            if epoch_in_stage % 50 == 0 or epoch_in_stage == max_epochs - 1:
+                print(f"  Époque {epoch_in_stage:3d}/{max_epochs - 1} | Loss: {avg_epoch_loss:.6f} | LR: {current_lr:.2e}")
+        
+        self._set_metrics(epoch_in_stage + 1, stage_losses, stage_lrs)
+        
+        print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
+        
+        # Sauvegarde du checkpoint d'étape
+        self._save_stage_checkpoint(model.state_dict(), optimizer.state_dict())

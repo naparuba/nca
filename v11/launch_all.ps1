@@ -1,9 +1,9 @@
 
 ############ 1 LAYER ############
 # 1-32
-python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 50
+python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 150
 #python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 100
-python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 200
+python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 600
 #python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 500
 #python .\main.py --skip-if-already --n-layers 1 --hidden-size 32 --epochs 1000
 

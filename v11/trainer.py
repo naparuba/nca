@@ -2,7 +2,6 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import numpy as np
 import torch
 
 from config import CONFIG
@@ -11,7 +10,6 @@ from torched import AdamW
 from visualizer import get_visualizer
 
 if TYPE_CHECKING:
-    from stages.base_stage import BaseStage
     from simulation_sequence import SimulationTemporalSequence
     from nca_model import NCA
 
@@ -31,78 +29,6 @@ class Trainer:
         self._optimizer = AdamW(model.parameters(), lr=CONFIG.LEARNING_RATE, weight_decay=1e-4)
     
     
-    def _adjust_learning_rate(self, stage_nb, epoch_in_stage):
-        # type: (int, int) -> None
-        """Ajuste le learning rate selon l'étape et la progression."""
-        
-        base_lr = CONFIG.LEARNING_RATE
-        
-        # Réduction progressive par étape, from 1.0 -> 0.6
-        stage_lr = base_lr * (1.0 - ((stage_nb - 1) / (len(STAGE_MANAGER.get_stages()) - 1)) * 0.4)
-        
-        # Décroissance cosine au sein de l'étape
-        cos_factor = 0.5 * (1 + np.cos(np.pi * epoch_in_stage / CONFIG.NB_EPOCHS_BY_STAGE))
-        final_lr = stage_lr * (0.1 + 0.9 * cos_factor)  # Ne descends pas sous 10% du LR de base
-        
-        for param_group in self._optimizer.param_groups:
-            param_group['lr'] = final_lr
-    
-    
-    def _train_stage(self, stage, max_epochs):
-        # type: (BaseStage, int) -> None
-        """
-        Entraînement complet d'une étape spécifique.
-
-        Args:
-            stage: Serieux?
-            max_epochs: Nombre maximum d'époques pour cette étape
-
-        Returns:
-            Dictionnaire avec les métriques de l'étape
-        """
-        stage_nb = stage.get_stage_nb()
-        print(f"\n🎯 === ÉTAPE {stage_nb} - DÉBUT ===")
-        print(f"📋 {stage.get_display_name()}")
-        print(f"⏱️  Maximum {max_epochs} époques")
-        
-        # Initialisation du cache pour cette étape
-        stage.generate_reality_sequences_for_training()
-        
-        # Métriques de l'étape
-        stage_losses = []
-        stage_lrs = []
-        epoch_in_stage = 0
-        
-        # Boucle d'entraînement de l'étape
-        for epoch_in_stage in range(max_epochs):
-            
-            # Ajustement du learning rate si curriculum activé
-            self._adjust_learning_rate(stage_nb, epoch_in_stage)
-            
-            # Entraînement par batch
-            epoch_losses = stage.train_full_sequence(self._model, self._optimizer)
-            
-            # Statistiques de l'époque
-            avg_epoch_loss = np.mean(epoch_losses)
-            stage_losses.append(avg_epoch_loss)
-            current_lr = self._optimizer.param_groups[0]['lr']
-            stage_lrs.append(current_lr)
-            
-            # Affichage périodique
-            if epoch_in_stage % 10 == 0 or epoch_in_stage == max_epochs - 1:
-                print(f"  Époque {epoch_in_stage:3d}/{max_epochs - 1} | "
-                      f"Loss: {avg_epoch_loss:.6f} | "
-                      f"LR: {current_lr:.2e}")
-        
-        stage.set_metrics(epoch_in_stage + 1, stage_losses, stage_lrs)
-        
-        print(f"📊 Époques entraînées: {epoch_in_stage + 1}/{max_epochs}")
-        
-        # Sauvegarde du checkpoint d'étape
-        stage = STAGE_MANAGER.get_stage(stage_nb)
-        stage.save_stage_checkpoint(self._model.state_dict(), self._optimizer.state_dict())
-    
-    
     def train_full_curriculum(self) -> None:
         print(f"\n🚀 === DÉBUT ENTRAÎNEMENT MODULAIRE ===")
         print(f"🎯 Seed: {CONFIG.SEED}")
@@ -114,7 +40,7 @@ class Trainer:
         
         # Entraînement séquentiel
         for stage in STAGE_MANAGER.get_stages():
-            self._train_stage(stage, CONFIG.NB_EPOCHS_BY_STAGE)
+            stage.train(self._model, self._optimizer)
             
             get_visualizer().evaluate_model_stage(self._model, stage)
             
@@ -130,8 +56,6 @@ class Trainer:
         
         # Sauvegarde du modèle final et des métriques
         self._save_final_model()
-        
-        return
     
     
     def _save_final_model(self):
