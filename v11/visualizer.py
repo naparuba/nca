@@ -1,7 +1,9 @@
 import json
 import shutil
+import warnings
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
+
 
 import matplotlib.animation as animation
 import numpy as np
@@ -13,6 +15,8 @@ from nca_model import NCA
 from stage_manager import STAGE_MANAGER
 from stages.base_stage import REALITY_LAYER
 from torched import get_MSELoss
+
+warnings.filterwarnings('ignore', category=UserWarning, message='.*Glyph.*missing from font.*')
 
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
@@ -192,7 +196,7 @@ class ProgressiveVisualizer:
                 pred_sources = grid_pred[REALITY_LAYER.HEAT_SOURCES]
                 
                 # On considère qu'une source est présente si >= 50% de SOURCE_INTENSITY
-                source_threshold = CONFIG.OBSTACLE_FULL_BLOCK_VALUE * 0.5
+                source_threshold = CONFIG.SOURCE_INTENSITY * 0.5
                 target_has_source = (target_sources >= source_threshold).float()
                 pred_has_source = (pred_sources >= source_threshold).float()
                 
@@ -561,43 +565,59 @@ class ProgressiveVisualizer:
         with open(perf_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        # Extraire et trier les configurations
-        configurations = []
+        # Extraire toutes les configurations d'abord
+        all_configs = []
         
-        for stage_key in sorted(data.keys(), key=lambda x: int(x.split('_')[1])):
+        for stage_key in data.keys():
             stage_nb = int(stage_key.split('_')[1])
             
-            for n_layers in sorted(data[stage_key].keys(), key=int):
-                for hidden_size in sorted(data[stage_key][n_layers].keys(), key=int):
-                    for nb_epochs in sorted(data[stage_key][n_layers][hidden_size].keys(), key=int):
-                        metrics = data[stage_key][n_layers][hidden_size][nb_epochs]
-                        
-                        # Extraction des métriques par couche (avec valeurs par défaut pour compatibilité)
-                        metrics_by_layer = metrics.get('metrics_by_layer', {})
-                        temp_metrics = metrics_by_layer.get('temperature', {})
-                        obstacle_metrics = metrics_by_layer.get('obstacles', {})
-                        source_metrics = metrics_by_layer.get('sources', {})
-                        
-                        configurations.append({
-                            'stage':                    stage_nb,
-                            'n_layers':                 int(n_layers),
-                            'hidden_size':              int(hidden_size),
-                            'nb_epochs':                int(nb_epochs),
-                            'avg_loss':                 metrics['avg_loss'],
-                            'std_dev':                  metrics['std_dev'],
-                            'label':                    f"S{stage_nb}_L{n_layers}_H{hidden_size}_E{nb_epochs}",
-                            # Nouvelles métriques
-                            'avg_temp_correct_pct':     temp_metrics.get('avg_correct_cells_pct', 0.0),
-                            'std_temp_correct_pct':     temp_metrics.get('std_correct_cells_pct', 0.0),
-                            'avg_temp_heat_ratio':      temp_metrics.get('avg_heat_ratio_pct', 0.0),
-                            'std_temp_heat_ratio':      temp_metrics.get('std_heat_ratio_pct', 0.0),
-                            # Obstacles
-                            'avg_obstacle_correct_pct': obstacle_metrics.get('avg_correct_cells_pct', 0.0),
-                            'std_obstacle_correct_pct': obstacle_metrics.get('std_correct_cells_pct', 0.0),
-                            # Sources
-                            'avg_source_correct_pct':   source_metrics.get('avg_correct_cells_pct', 0.0),
-                            'std_source_correct_pct':   source_metrics.get('std_correct_cells_pct', 0.0),
+            for n_layers in data[stage_key].keys():
+                for hidden_size in data[stage_key][n_layers].keys():
+                    for nb_epochs in data[stage_key][n_layers][hidden_size].keys():
+                        all_configs.append({
+                            'stage_key': stage_key,
+                            'stage_nb': stage_nb,
+                            'n_layers': int(n_layers),
+                            'hidden_size': int(hidden_size),
+                            'nb_epochs': int(nb_epochs),
+                            'metrics': data[stage_key][n_layers][hidden_size][nb_epochs]
                         })
+        
+        # Trier selon l'ordre demandé : stage → nb_epochs → n_layers → hidden_size
+        all_configs.sort(key=lambda x: (x['stage_nb'], x['nb_epochs'], x['n_layers'], x['hidden_size']))
+        
+        # Construire la liste des configurations pour les graphiques
+        configurations = []
+        
+        for config in all_configs:
+            metrics = config['metrics']
+            
+            # Extraction des métriques par couche (avec valeurs par défaut pour compatibilité)
+            metrics_by_layer = metrics.get('metrics_by_layer', {})
+            temp_metrics = metrics_by_layer.get('temperature', {})
+            obstacle_metrics = metrics_by_layer.get('obstacles', {})
+            source_metrics = metrics_by_layer.get('sources', {})
+            
+            configurations.append({
+                'stage':                    config['stage_nb'],
+                'n_layers':                 config['n_layers'],
+                'hidden_size':              config['hidden_size'],
+                'nb_epochs':                config['nb_epochs'],
+                'avg_loss':                 metrics['avg_loss'],
+                'std_dev':                  metrics['std_dev'],
+                'label':                    f"S{config['stage_nb']}_L{config['n_layers']}_H{config['hidden_size']}_E{config['nb_epochs']}",
+                # Nouvelles métriques
+                'avg_temp_correct_pct':     temp_metrics.get('avg_correct_cells_pct', 0.0),
+                'std_temp_correct_pct':     temp_metrics.get('std_correct_cells_pct', 0.0),
+                'avg_temp_heat_ratio':      temp_metrics.get('avg_heat_ratio_pct', 0.0),
+                'std_temp_heat_ratio':      temp_metrics.get('std_heat_ratio_pct', 0.0),
+                # Obstacles
+                'avg_obstacle_correct_pct': obstacle_metrics.get('avg_correct_cells_pct', 0.0),
+                'std_obstacle_correct_pct': obstacle_metrics.get('std_correct_cells_pct', 0.0),
+                # Sources
+                'avg_source_correct_pct':   source_metrics.get('avg_correct_cells_pct', 0.0),
+                'std_source_correct_pct':   source_metrics.get('std_correct_cells_pct', 0.0),
+            })
         
         if not configurations:
             print("⚠️ Aucune configuration trouvée dans le fichier JSON.")
