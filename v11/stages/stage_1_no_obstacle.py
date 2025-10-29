@@ -1,9 +1,4 @@
-from typing import Tuple
-
-import torch
-from config import DEVICE
 from stages.base_stage import BaseStage
-from torched import get_matrix_boolean
 
 
 class Stage1NoObstacle(BaseStage):
@@ -11,8 +6,9 @@ class Stage1NoObstacle(BaseStage):
     DISPLAY_NAME = "Sans obstable"
     COLOR = 'green'
     
+    # et donner uen vraie taille random
+    MIN_OBSTACLE_SIZE = 0
+    MAX_OBSTACLE_SIZE = 0
     
-    def generate_obstacles(self, size, source_pos):
-        # type: (int, Tuple[int, int]) -> torch.Tensor
-        """Étape 1: Aucun obstacle - grille vide pour apprentissage de base."""
-        return get_matrix_boolean((size, size), False)
+    MIN_OBSTACLE_NB = 0
+    MAX_OBSTACLE_NB = 0

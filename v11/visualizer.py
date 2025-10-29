@@ -4,7 +4,6 @@ import warnings
 from pathlib import Path
 from typing import Dict, Any, List, TYPE_CHECKING
 
-
 import matplotlib.animation as animation
 import numpy as np
 import torch
@@ -364,7 +363,8 @@ class ProgressiveVisualizer:
         print(f"💾 Performances sauvegardées dans {perf_file}")
     
     
-    def generate_and_run_one_sequence(self, model, stage):
+    @staticmethod
+    def generate_and_run_one_sequence(model, stage):
         # type: (NCA, BaseStage) -> (List, List)
         simulation_temporal_sequence = stage.generate_simulation_temporal_sequence(n_steps=CONFIG.POSTVIS_STEPS, size=CONFIG.GRID_SIZE)
         
@@ -387,7 +387,7 @@ class ProgressiveVisualizer:
         
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
             for _ in range(CONFIG.POSTVIS_STEPS):
-                world_nca_prediction = model.run_step(world_nca_prediction)  # , source_mask)  # , obstacle_mask)
+                world_nca_prediction = model.run_step(world_nca_prediction)
                 nca_temporal_sequence.append(world_nca_prediction.clone())
         
         return reality_worlds, nca_temporal_sequence
@@ -575,12 +575,12 @@ class ProgressiveVisualizer:
                 for hidden_size in data[stage_key][n_layers].keys():
                     for nb_epochs in data[stage_key][n_layers][hidden_size].keys():
                         all_configs.append({
-                            'stage_key': stage_key,
-                            'stage_nb': stage_nb,
-                            'n_layers': int(n_layers),
+                            'stage_key':   stage_key,
+                            'stage_nb':    stage_nb,
+                            'n_layers':    int(n_layers),
                             'hidden_size': int(hidden_size),
-                            'nb_epochs': int(nb_epochs),
-                            'metrics': data[stage_key][n_layers][hidden_size][nb_epochs]
+                            'nb_epochs':   int(nb_epochs),
+                            'metrics':     data[stage_key][n_layers][hidden_size][nb_epochs]
                         })
         
         # Trier selon l'ordre demandé : stage → nb_epochs → n_layers → hidden_size

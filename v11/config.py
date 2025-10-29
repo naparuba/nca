@@ -14,7 +14,7 @@ class ModularConfig:
         
         self.VISUALIZATION_SEED = 3333
         
-        self.NB_EPOCHS_BY_STAGE = 50#200
+        self.NB_EPOCHS_BY_STAGE = 50  # 200
         self.NB_EPOCHS_FOR_EVALUATION = 250
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3
@@ -37,13 +37,6 @@ class ModularConfig:
         # Paramètres du modèle
         self.HIDDEN_SIZE = 128
         self.N_LAYERS = 3
-        
-        self.MIN_OBSTACLE_SIZE = 2
-        self.MAX_OBSTACLE_SIZE = 4
-        
-        # Optimisations
-        self.CACHE_SIZE = 200
-        self.USE_MIXED_PRECISION = False
         
         # STAGE CACHE SIZES
         self.STAGE_CACHE_SIZE = 250
