@@ -43,6 +43,7 @@ class ModularConfig:
         
         # Options de ligne de commande (surchargées par argparse)
         self.SKIP_IF_ALREADY = False
+        self.VISUALIZATION_ONLY = False
         
         self.DEVICE = DEVICE
 

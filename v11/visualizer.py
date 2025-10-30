@@ -8,6 +8,8 @@ import matplotlib.animation as animation
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 
 from config import CONFIG
 from nca_model import NCA
@@ -20,6 +22,15 @@ warnings.filterwarnings('ignore', category=UserWarning, message='.*Glyph.*missin
 if TYPE_CHECKING:
     from stages.base_stage import BaseStage
 
+from stages.stage_1_no_obstacle import Stage1NoObstacle
+from stages.stage_2_one_obstacle import Stage2OneObstacle
+from stages.stage_3_few_obstacles import Stage3FewObstacles
+
+STAGE_ORDER_LIST = [Stage1NoObstacle.get_name(),
+                    Stage2OneObstacle.get_name(),
+                    Stage3FewObstacles.get_name(),
+                    ]
+
 
 class ProgressiveVisualizer:
     """
@@ -30,6 +41,17 @@ class ProgressiveVisualizer:
     
     def __init__(self):
         self._loss_fn = get_MSELoss()
+    
+    
+    def _get_stage_colors(self):
+        # type: () -> Dict
+        
+        # Récupérer les couleurs des stages depuis le STAGE_MANAGER
+        stage_colors = {}
+        for stage in STAGE_MANAGER.get_stages():
+            stage_colors[stage.get_name()] = stage.get_color()
+        
+        return stage_colors
     
     
     def check_configuration_already_evaluated(self, stage_nb, n_layers, hidden_size, nb_epochs_trained):
@@ -249,6 +271,7 @@ class ProgressiveVisualizer:
         
         # Sauvegarde des performances dans le fichier JSON
         self._save_evaluation_performance(
+                stage_id=stage.get_name(),
                 stage_nb=stage_nb,
                 n_layers=CONFIG.N_LAYERS,
                 hidden_size=CONFIG.HIDDEN_SIZE,
@@ -271,16 +294,17 @@ class ProgressiveVisualizer:
         )
     
     
-    def _save_evaluation_performance(self, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev, nb_evaluations,
+    def _save_evaluation_performance(self, stage_id, stage_nb, n_layers, hidden_size, nb_epochs_trained, total_loss, avg_loss, std_dev,
+                                     nb_evaluations,
                                      avg_temp_correct_pct, std_temp_correct_pct, avg_temp_heat_ratio, std_temp_heat_ratio, avg_obstacle_correct_pct,
                                      std_obstacle_correct_pct, avg_source_correct_pct, std_source_correct_pct):
-        # type: (int, int, int, int, float, float, float, int, float, float, float, float, float, float, float, float) -> None
+        # type: (string, int, int, int, int, float, float, float, int, float, float, float, float, float, float, float, float) -> None
         """
         Sauvegarde les performances d'évaluation dans un fichier JSON structuré.
         
         Structure du JSON:
         {
-            "stage_1": {
+            "no_obstacle": {
                 "3": {  # n_layers
                     "128": {  # hidden_size
                         "50": {  # nb_epochs_trained
@@ -319,7 +343,7 @@ class ProgressiveVisualizer:
             data = {}
         
         # Créer les clés de structure si elles n'existent pas
-        stage_key = f"stage_{stage_nb}"
+        stage_key = stage_id
         layers_key = str(n_layers)
         hidden_key = str(hidden_size)
         epochs_key = str(nb_epochs_trained)
@@ -565,14 +589,11 @@ class ProgressiveVisualizer:
         all_configs = []
         
         for stage_key in data.keys():
-            stage_nb = int(stage_key.split('_')[1])
-            
             for n_layers in data[stage_key].keys():
                 for hidden_size in data[stage_key][n_layers].keys():
                     for nb_epochs in data[stage_key][n_layers][hidden_size].keys():
                         all_configs.append({
                             'stage_key':   stage_key,
-                            'stage_nb':    stage_nb,
                             'n_layers':    int(n_layers),
                             'hidden_size': int(hidden_size),
                             'nb_epochs':   int(nb_epochs),
@@ -580,7 +601,13 @@ class ProgressiveVisualizer:
                         })
         
         # Trier selon l'ordre demandé : stage → nb_epochs → n_layers → hidden_size
-        all_configs.sort(key=lambda x: (x['stage_nb'], x['nb_epochs'], x['n_layers'], x['hidden_size']))
+        # On utilise l'index dans STAGE_ORDER_LIST pour l'ordre des stages, sinon on met en dernier
+        all_configs.sort(key=lambda x: (
+            STAGE_ORDER_LIST.index(x['stage_key']) if x['stage_key'] in STAGE_ORDER_LIST else len(STAGE_ORDER_LIST),
+            x['nb_epochs'],
+            x['n_layers'],
+            x['hidden_size']
+        ))
         
         # Construire la liste des configurations pour les graphiques
         configurations = []
@@ -595,13 +622,13 @@ class ProgressiveVisualizer:
             source_metrics = metrics_by_layer.get('sources', {})
             
             configurations.append({
-                'stage':                    config['stage_nb'],
+                'stage':                    config['stage_key'],
                 'n_layers':                 config['n_layers'],
                 'hidden_size':              config['hidden_size'],
                 'nb_epochs':                config['nb_epochs'],
                 'avg_loss':                 metrics['avg_loss'],
                 'std_dev':                  metrics['std_dev'],
-                'label':                    f"S{config['stage_nb']}_L{config['n_layers']}_H{config['hidden_size']}_E{config['nb_epochs']}",
+                'label':                    f"S{config['stage_key']}_L{config['n_layers']}_H{config['hidden_size']}_E{config['nb_epochs']}",
                 # Nouvelles métriques
                 'avg_temp_correct_pct':     temp_metrics.get('avg_correct_cells_pct', 0.0),
                 'std_temp_correct_pct':     temp_metrics.get('std_correct_cells_pct', 0.0),
@@ -645,12 +672,8 @@ class ProgressiveVisualizer:
         # Créer le graphique
         fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
         
-        # Récupérer les couleurs des stages depuis le STAGE_MANAGER
-        stage_colors = {}
-        for stage in STAGE_MANAGER.get_stages():
-            stage_colors[stage.get_stage_nb()] = stage.get_color()
-        
-        # Couleurs des barres selon le stage
+        stage_colors = self._get_stage_colors()
+        # # Couleurs des barres selon le stage
         bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
         
         # Tracer les barres avec error bars
@@ -739,9 +762,7 @@ class ProgressiveVisualizer:
         fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
         
         # Récupérer les couleurs des stages
-        stage_colors = {}
-        for stage in STAGE_MANAGER.get_stages():
-            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        stage_colors = self._get_stage_colors()
         
         bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
         
@@ -827,9 +848,7 @@ class ProgressiveVisualizer:
         fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
         
         # Récupérer les couleurs des stages
-        stage_colors = {}
-        for stage in STAGE_MANAGER.get_stages():
-            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        stage_colors = self._get_stage_colors()
         
         bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
         
@@ -913,9 +932,7 @@ class ProgressiveVisualizer:
         fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
         
         # Récupérer les couleurs des stages
-        stage_colors = {}
-        for stage in STAGE_MANAGER.get_stages():
-            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        stage_colors = self._get_stage_colors()
         
         bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
         
@@ -1001,9 +1018,7 @@ class ProgressiveVisualizer:
         fig, ax = plt.subplots(figsize=(max(16, len(configurations) * 0.8), 8))
         
         # Récupérer les couleurs des stages
-        stage_colors = {}
-        for stage in STAGE_MANAGER.get_stages():
-            stage_colors[stage.get_stage_nb()] = stage.get_color()
+        stage_colors = self._get_stage_colors()
         
         bar_colors = [stage_colors.get(stage, 'gray') for stage in stages]
         
@@ -1098,8 +1113,6 @@ class ProgressiveVisualizer:
     def _create_stage_legend(stages, stage_colors, has_trend, add_perfection=False):
         # type: (List[int], Dict[int, str], bool, bool) -> List
         """Crée les éléments de légende pour les stages"""
-        from matplotlib.patches import Patch
-        from matplotlib.lines import Line2D
         
         legend_elements = []
         

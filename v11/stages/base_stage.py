@@ -61,16 +61,19 @@ class BaseStage(ABC):
         self._loss_fn = get_MSELoss()
     
     
-    def get_name(self):
-        return self.NAME
+    @classmethod
+    def get_name(cls):
+        return cls.NAME
     
     
-    def get_display_name(self):
-        return self.DISPLAY_NAME
+    @classmethod
+    def get_display_name(cls):
+        return cls.DISPLAY_NAME
     
     
-    def get_color(self):
-        return self.COLOR
+    @classmethod
+    def get_color(cls):
+        return cls.COLOR
     
     
     def set_stage_nb(self, stage_nb: int):
@@ -185,6 +188,7 @@ class BaseStage(ABC):
         """Retourne les métriques de l'étape."""
         
         return {
+            'id':       self.get_name(),
             'stage_nb':       self.get_stage_nb(),
             'epochs_trained': self._metrics_epochs_trained,
             'loss_history':   self._metrics_loss_history,

@@ -32,6 +32,7 @@ def parse_command_line_args() -> None:
     - --hidden-size: Taille de la couche cachée du réseau de neurones
     - --n-layers: Nombre de couches du réseau de neurones
     - --skip-if-already: Évite de ré-entraîner une configuration déjà évaluée
+    - --visualization-only: Génère uniquement les graphiques de performance sans entraînement
     """
     parser = argparse.ArgumentParser(description="Neural Cellular Automaton - Apprentissage modulaire progressif")
     # Arguments pour surcharger les paramètres d'entraînement
@@ -43,6 +44,9 @@ def parse_command_line_args() -> None:
     # Optimisation pour éviter les calculs redondants
     parser.add_argument("--skip-if-already", action="store_true",
                        help="Saute l'entraînement si la configuration a déjà été évaluée")
+    # Mode visualisation uniquement
+    parser.add_argument("--visualization-only", action="store_true",
+                       help="Génère uniquement les graphiques de performance sans entraînement")
     
     # Parse des arguments et mise à jour de la configuration
     args = parser.parse_args()
@@ -54,6 +58,7 @@ def parse_command_line_args() -> None:
     CONFIG.HIDDEN_SIZE = args.hidden_size
     CONFIG.N_LAYERS = args.n_layers
     CONFIG.SKIP_IF_ALREADY = args.skip_if_already
+    CONFIG.VISUALIZATION_ONLY = args.visualization_only
     
     # Recalcul du nombre total d'époques basé sur la nouvelle valeur par étape
     CONFIG.TOTAL_EPOCHS = CONFIG.NB_EPOCHS_BY_STAGE * len(STAGE_MANAGER.get_stages())
@@ -66,6 +71,7 @@ def parse_command_line_args() -> None:
     print(f"   • Nombre de couches: {CONFIG.N_LAYERS}")
     print(f"   • Total époques: {CONFIG.TOTAL_EPOCHS}")
     print(f"   • Skip si déjà évalué: {CONFIG.SKIP_IF_ALREADY}")
+    print(f"   • Mode visualisation uniquement: {CONFIG.VISUALIZATION_ONLY}")
 
 
 # Initialisation - Application des arguments CLI avant tout le reste
@@ -94,6 +100,20 @@ def main():
     print(f"=" * 80)
     
     try:
+        # Mode visualisation uniquement : génère les graphiques sans entraînement
+        if CONFIG.VISUALIZATION_ONLY:
+            print("\n📊 Mode visualisation uniquement activé")
+            print("🎨 Génération des graphiques de performance...")
+            
+            visualizer = get_visualizer()
+            visualizer.plot_performance_comparison()
+            
+            print(f"\n" + "=" * 80)
+            print(f"✅ VISUALISATIONS GÉNÉRÉES AVEC SUCCÈS!")
+            print(f"=" * 80)
+            print(f"📁 Graphiques sauvegardés dans: {CONFIG.OUTPUT_DIR}")
+            return
+        
         # Vérification si la configuration a déjà été évaluée (si option activée)
         if CONFIG.SKIP_IF_ALREADY:
             print("\n🔍 Vérification si la configuration a déjà été évaluée...")
