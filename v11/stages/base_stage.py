@@ -305,7 +305,7 @@ class BaseStage(ABC):
         # Simulation temporelle
         reality_worlds = [RealityWorld(grid.clone())]
         for _ in range(n_steps):
-            grid = self._play_diffusion_step(grid, source_mask, obstacle_mask)
+            grid = self._play_diffusion_step(grid)
             reality_worlds.append(RealityWorld(grid.clone()))
         
         sequence = SimulationTemporalSequence(reality_worlds)
@@ -314,8 +314,15 @@ class BaseStage(ABC):
     
     # Un pas de diffusion de chaleur avec obstacles
     # NOTE: on ne diffuse que les températures, les obstacles restent fixes, les sources aussi
-    def _play_diffusion_step(self, grid, source_mask, obstacle_mask):
-        # type: (torch.Tensor, torch.Tensor, torch.Tensor) -> torch.Tensor
+    def _play_diffusion_step(self, grid):
+        # type: (torch.Tensor) -> torch.Tensor
+        
+        # On extrait les masques depuis les layers correspondants
+        # Les obstacles sont là où la layer OBSTACLE contient des valeurs non nulles
+        obstacle_mask = grid[REALITY_LAYER.OBSTACLE] != 0
+        
+        # Les sources sont là où la layer HEAT_SOURCES contient des valeurs non nulles
+        source_mask = grid[REALITY_LAYER.HEAT_SOURCES] != 0
         
         # On applique la diffusion uniquement sur la couche température
         x = grid[REALITY_LAYER.TEMPERATURE].unsqueeze(0).unsqueeze(0)  # Que la couche de température, shape (1, 1, H, W)
@@ -329,7 +336,8 @@ class BaseStage(ABC):
         
         # IMPORTANT : On force la source à conserver son intensité (contrainte physique stricte)
         # Sans cela, la source s'atténue progressivement avec la diffusion
-        new_grid[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY
+        # On récupère l'intensité depuis la layer HEAT_SOURCES pour respecter les futures variations
+        new_grid[REALITY_LAYER.TEMPERATURE][source_mask] = grid[REALITY_LAYER.HEAT_SOURCES][source_mask]
         
         # Les obstacles restent à 0 dans la couche température (pas de chaleur dans les obstacles)
         new_grid[REALITY_LAYER.TEMPERATURE][obstacle_mask] = 0.0
