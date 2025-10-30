@@ -308,7 +308,7 @@ class BaseStage(ABC):
             grid = self._play_diffusion_step(grid, source_mask, obstacle_mask)
             reality_worlds.append(RealityWorld(grid.clone()))
         
-        sequence = SimulationTemporalSequence(reality_worlds, source_mask, obstacle_mask)
+        sequence = SimulationTemporalSequence(reality_worlds)
         return sequence
     
     
@@ -365,11 +365,9 @@ class BaseStage(ABC):
         optimizer.zero_grad()
         
         reality_worlds = sequence.get_reality_worlds()
-        source_mask = sequence.get_source_mask()
-        obstacle_mask = sequence.get_obstacle_mask()
         
         # Initialisation
-        grid_pred = torch.zeros_like(reality_worlds[0].get_as_tensor())
+        grid_pred = reality_worlds[0].get_as_tensor().clone().detach()
         
         # TODO: bruiter la température initiale?
         # g = torch.Generator(device=DEVICE)
@@ -378,16 +376,12 @@ class BaseStage(ABC):
         #        grid_pred[REALITY_LAYER.TEMPERATURE], device=DEVICE
         # ) * 0.05  # Petite valeur initiale aléatoire pour la température
         
-        # grid_pred[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY  # Set Les sources, on a une chaleur dès le départ  # TODO: need to init or not?
-        grid_pred[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # Set les obstacles
-        grid_pred[REALITY_LAYER.HEAT_SOURCES][source_mask] = CONFIG.SOURCE_INTENSITY  # Set les sources
-        
         total_loss = torch.tensor(0.0, device=CONFIG.DEVICE)
         
         # Déroulement temporel
         for t_step in range(CONFIG.NCA_STEPS):
             target = reality_worlds[t_step + 1].get_as_tensor()
-            grid_pred = model.run_step(grid_pred)  # , source_mask)
+            grid_pred = model.run_step(grid_pred)
             
             # Perte standard sur la prédiction globale de la température
             step_loss = self._loss_fn(grid_pred, target)

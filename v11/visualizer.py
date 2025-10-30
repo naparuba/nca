@@ -373,16 +373,12 @@ class ProgressiveVisualizer:
         
         # Simulation NCA avec torch.no_grad() pour éviter le gradient
         reality_worlds = simulation_temporal_sequence.get_reality_worlds()
-        source_mask = simulation_temporal_sequence.get_source_mask()
-        obstacle_mask = simulation_temporal_sequence.get_obstacle_mask()
         
         # Run model
         nca_temporal_sequence = []
-        world_nca_prediction = torch.zeros_like(reality_worlds[0].get_as_tensor())  # start with the same start as reality
-        # On accède à la couche température (REALITY_LAYER.TEMPERATURE = 0) avant d'appliquer le masque
-        # world_nca_prediction[REALITY_LAYER.TEMPERATURE][source_mask] = CONFIG.SOURCE_INTENSITY  # TODO: KEEP?
-        world_nca_prediction[REALITY_LAYER.OBSTACLE][obstacle_mask] = CONFIG.OBSTACLE_FULL_BLOCK_VALUE  # configure the obstacles
-        world_nca_prediction[REALITY_LAYER.HEAT_SOURCES][source_mask] = CONFIG.SOURCE_INTENSITY
+        world_nca_prediction = reality_worlds[0].get_as_tensor().clone().detach()
+        
+        # Le premier state est l'initial
         nca_temporal_sequence.append(world_nca_prediction.clone())
         
         with torch.no_grad():  # Désactive le calcul de gradient pour les visualisations
