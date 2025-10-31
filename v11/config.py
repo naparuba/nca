@@ -12,9 +12,7 @@ class ModularConfig:
         # Paramètres matériels de base
         self.SEED = 3333
         
-        self.VISUALIZATION_SEED = 3333
-        
-        self.NB_EPOCHS_BY_STAGE = 50  # 200
+        self.NB_EPOCHS_BY_STAGE = 150
         self.NB_EPOCHS_FOR_EVALUATION = 250
         
         self.TOTAL_EPOCHS = self.NB_EPOCHS_BY_STAGE * 3

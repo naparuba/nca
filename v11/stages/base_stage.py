@@ -9,7 +9,7 @@ from config import CONFIG
 from reality_world import RealityWorld
 from simulation_temporal_sequence import SimulationTemporalSequence
 from torch.nn import functional as F
-from torched import get_MSELoss, get_matrix_boolean
+from torched import get_MSELoss, get_matrix_boolean, get_random_int
 
 if TYPE_CHECKING:
     from typing import Tuple, List, Dict
@@ -132,24 +132,21 @@ class BaseStage(ABC):
         
         obstacle_mask = get_matrix_boolean((size, size), fill_value=False)
         
-        g = torch.Generator(device=CONFIG.DEVICE)
-        g.manual_seed(CONFIG.SEED)
-        
-        n_obstacles = torch.randint(self.MIN_OBSTACLE_NB, self.MAX_OBSTACLE_NB + 1, (1,), generator=g, device=CONFIG.DEVICE).item()
+        n_obstacles = get_random_int(self.MIN_OBSTACLE_NB, self.MAX_OBSTACLE_NB + 1)
         
         source_i, source_j = source_pos
         placed_obstacles = []
         
         for obstacle_idx in range(n_obstacles):
-            obstacle_size = torch.randint(self.MIN_OBSTACLE_SIZE, self.MAX_OBSTACLE_SIZE + 1, (1,), generator=g, device=CONFIG.DEVICE).item()
+            obstacle_size = get_random_int(self.MIN_OBSTACLE_SIZE, self.MAX_OBSTACLE_SIZE + 1)
             
             max_pos = size - obstacle_size
             if max_pos <= 1:
                 continue
             
             for attempt in range(50):
-                i = torch.randint(1, max_pos, (1,), generator=g, device=CONFIG.DEVICE).item()
-                j = torch.randint(1, max_pos, (1,), generator=g, device=CONFIG.DEVICE).item()
+                i = get_random_int(1, max_pos)
+                j = get_random_int(1, max_pos)
                 
                 # Vérifications multiples pour étape 3
                 valid_position = True
@@ -188,7 +185,7 @@ class BaseStage(ABC):
         """Retourne les métriques de l'étape."""
         
         return {
-            'id':       self.get_name(),
+            'id':             self.get_name(),
             'stage_nb':       self.get_stage_nb(),
             'epochs_trained': self._metrics_epochs_trained,
             'loss_history':   self._metrics_loss_history,
@@ -280,10 +277,8 @@ class BaseStage(ABC):
             (séquence, masque_source, masque_obstacles)
         """
         # Position aléatoire de la source
-        g = torch.Generator(device=CONFIG.DEVICE)
-        g.manual_seed(CONFIG.SEED)
-        i0 = torch.randint(2, size - 2, (1,), generator=g, device=CONFIG.DEVICE).item()
-        j0 = torch.randint(2, size - 2, (1,), generator=g, device=CONFIG.DEVICE).item()
+        i0 = get_random_int(2, size - 2)
+        j0 = get_random_int(2, size - 2)
         
         # Génération d'obstacles selon l'étape
         obstacle_mask = self.generate_obstacles(size, (i0, j0))

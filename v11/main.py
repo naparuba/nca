@@ -5,11 +5,9 @@ import sys
 import time
 import traceback
 
-import numpy as np
-import torch
-
 from nca_model import NCA
 from stage_manager import STAGE_MANAGER
+from torched import set_random_seed
 from trainer import Trainer
 from visualizer import get_visualizer
 
@@ -43,10 +41,10 @@ def parse_command_line_args() -> None:
     parser.add_argument("--n-layers", type=int, default=CONFIG.N_LAYERS)
     # Optimisation pour éviter les calculs redondants
     parser.add_argument("--skip-if-already", action="store_true",
-                       help="Saute l'entraînement si la configuration a déjà été évaluée")
+                        help="Saute l'entraînement si la configuration a déjà été évaluée")
     # Mode visualisation uniquement
     parser.add_argument("--visualization-only", action="store_true",
-                       help="Génère uniquement les graphiques de performance sans entraînement")
+                        help="Génère uniquement les graphiques de performance sans entraînement")
     
     # Parse des arguments et mise à jour de la configuration
     args = parser.parse_args()
@@ -77,10 +75,6 @@ def parse_command_line_args() -> None:
 # Initialisation - Application des arguments CLI avant tout le reste
 parse_command_line_args()
 
-# Initialisation
-torch.manual_seed(CONFIG.SEED)
-np.random.seed(CONFIG.SEED)
-
 # Création du répertoire de sortie avec seed
 CONFIG.OUTPUT_DIR = f"outputs"
 os.makedirs(CONFIG.OUTPUT_DIR, exist_ok=True)
@@ -98,6 +92,8 @@ def main():
     print(f"\n" + "=" * 80)
     print(f"🚀 NEURAL CELLULAR AUTOMATON - APPRENTISSAGE MODULAIRE")
     print(f"=" * 80)
+    
+    set_random_seed(CONFIG.SEED)  # Assure la reproductibilité
     
     try:
         # Mode visualisation uniquement : génère les graphiques sans entraînement
@@ -124,10 +120,10 @@ def main():
             for stage in STAGE_MANAGER.get_stages():
                 stage_nb = stage.get_stage_nb()
                 already_evaluated = visualizer.check_configuration_already_evaluated(
-                    stage_nb=stage_nb,
-                    n_layers=CONFIG.N_LAYERS,
-                    hidden_size=CONFIG.HIDDEN_SIZE,
-                    nb_epochs_trained=CONFIG.NB_EPOCHS_BY_STAGE
+                        stage_nb=stage_nb,
+                        n_layers=CONFIG.N_LAYERS,
+                        hidden_size=CONFIG.HIDDEN_SIZE,
+                        nb_epochs_trained=CONFIG.NB_EPOCHS_BY_STAGE
                 )
                 
                 if not already_evaluated:
@@ -137,7 +133,8 @@ def main():
                     print(f"   ✅ Stage {stage_nb}: Déjà évalué")
             
             if all_stages_already_evaluated:
-                print(f"\n⏭️  Configuration déjà évaluée pour tous les stages! N_LAYERS={CONFIG.N_LAYERS} HIDDEN_SIZE={CONFIG.HIDDEN_SIZE} NB_EPOCHS={CONFIG.NB_EPOCHS_BY_STAGE}")
+                print(
+                    f"\n⏭️  Configuration déjà évaluée pour tous les stages! N_LAYERS={CONFIG.N_LAYERS} HIDDEN_SIZE={CONFIG.HIDDEN_SIZE} NB_EPOCHS={CONFIG.NB_EPOCHS_BY_STAGE}")
                 sys.exit(0)
         
         # Initialisation du modèle

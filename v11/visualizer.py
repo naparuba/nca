@@ -110,10 +110,6 @@ class ProgressiveVisualizer:
         
         print(f"\n🔍 Évaluation du modèle à l'étape {stage_nb}...")
         
-        # Génération de la séquence de test avec seed fixe
-        torch.manual_seed(CONFIG.VISUALIZATION_SEED)
-        np.random.seed(CONFIG.VISUALIZATION_SEED)
-        
         total_loss = torch.tensor(0.0, device=CONFIG.DEVICE)
         
         losses = []  # type: List[float]
@@ -420,10 +416,6 @@ class ProgressiveVisualizer:
         stage_nb = stage.get_stage_nb()
         
         print(f"\n🎨 Génération des visualisations pour l'étape {stage_nb}...")
-        
-        # Génération de la séquence de test avec seed fixe
-        torch.manual_seed(CONFIG.VISUALIZATION_SEED)
-        np.random.seed(CONFIG.VISUALIZATION_SEED)
         
         reality_worlds, nca_temporal_sequence = self.generate_and_run_one_sequence(model, stage)
         
