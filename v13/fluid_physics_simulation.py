@@ -375,12 +375,32 @@ class FluidSimulation:
         3. Débordement latéral : EAU s'étale
         4. Diffusion du gaz : GAZ se répartit dans le VIDE
         5. Condensation : l'EAU se condense vers le bas
+        
+        La conservation de la masse est vérifiée après chaque étape.
+        Si une perte de matière est détectée, le programme s'arrête avec une erreur.
         """
+        # Vérification initiale
+        self._check_mass_conservation()
+        
+        # 1. Gravité
         self._apply_gravity()
+        self._check_mass_conservation("gravité")
+        
+        # 2. Flottabilité
         self._apply_buoyancy()
+        self._check_mass_conservation("flottabilité")
+        
+        # 3. Débordement latéral
         self._apply_lateral_flow()
+        self._check_mass_conservation("débordement latéral")
+        
+        # 4. Diffusion du gaz
         self._apply_gas_diffusion()
+        self._check_mass_conservation("diffusion du gaz")
+        
+        # 5. Condensation de l'eau
         self._apply_water_condensation()
+        self._check_mass_conservation("condensation de l'eau")
     
     def _get_stats(self) -> Tuple[int, int, int]:
         """
@@ -519,7 +539,45 @@ class FluidSimulation:
         print(f"✅ Animation sauvegardée : {output_path}")
         print(f"   📁 Taille de la grille : {self.grid_size}x{self.grid_size}")
         print(f"   🎞️  Nombre de frames : {len(frames_to_plot)}")
+    
+    
+    def _check_mass_conservation(self, step_name: str = ""):
+        """
+        Vérifie que la masse totale (gaz + eau) est conservée.
+        Si on détecte une perte de matière, on arrête le programme.
+        
+        Args:
+            step_name: Nom de l'étape pour le message d'erreur
+        """
+        current_gas = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
+        current_water = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
+        
+        # On stocke les masses initiales lors de la première vérification
+        if not hasattr(self, '_initial_gas'):
+            self._initial_gas = current_gas
+            self._initial_water = current_water
+            return
+            
+        # Vérification avec une tolérance pour les erreurs de calcul flottant
+        gas_diff = abs(current_gas - self._initial_gas)
+        water_diff = abs(current_water - self._initial_water)
+        
+        if gas_diff > 1e-10 or water_diff > 1e-10:
+            error_msg = f"""
+ERREUR FATALE: Perte de conservation de la matière détectée {f'après {step_name}' if step_name else ''}
 
+GAZ:
+- Initial: {self._initial_gas:.10f}
+- Actuel:  {current_gas:.10f}
+- Diff:    {gas_diff:.10f}
+
+EAU:
+- Initial: {self._initial_water:.10f}
+- Actuel:  {current_water:.10f}
+- Diff:    {water_diff:.10f}
+"""
+            raise RuntimeError(error_msg)
+        
 
 def main():
     """
