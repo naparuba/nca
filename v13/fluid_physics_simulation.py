@@ -216,45 +216,52 @@ class FluidSimulation:
         """
         PHASE 4 : DIFFUSION DU GAZ
         
-        Le gaz se diffuse dans le vide en divisant sa densité.
-        Pas de perte : conservation de la masse totale de gaz.
+        Le gaz se diffuse uniformément vers le haut :
+        1. On calcule d'abord la densité totale du gaz
+        2. On compte les cases vides au-dessus du gaz le plus haut
+        3. On répartit uniformément le gaz dans les cases disponibles
         """
         new_grid = self.grid.clone()
         
+        # 1. Calculer la densité totale de gaz et trouver la position du gaz
+        total_gas_density = 0.0
+        gas_positions = []
+        highest_gas_row = self.grid_size  # Plus haute position du gaz
+        
         for i in range(self.grid_size):
             for j in range(self.grid_size):
-                current_type = int(self.grid[CHANNEL_TYPE, i, j].item())
-                current_density = self.grid[CHANNEL_DENSITY, i, j].item()
-                
-                # Si c'est du GAZ avec une densité non nulle
-                if current_type == TYPE_GAS and current_density > 0.0:
-                    # Chercher les voisins VIDES dans les 4 directions
-                    empty_neighbors = []
-                    
-                    if i > 0 and int(self.grid[CHANNEL_TYPE, i - 1, j].item()) == TYPE_EMPTY:
-                        empty_neighbors.append((i - 1, j))
-                    
-                    if i < self.grid_size - 1 and int(self.grid[CHANNEL_TYPE, i + 1, j].item()) == TYPE_EMPTY:
-                        empty_neighbors.append((i + 1, j))
-                    
-                    if j > 0 and int(self.grid[CHANNEL_TYPE, i, j - 1].item()) == TYPE_EMPTY:
-                        empty_neighbors.append((i, j - 1))
-                    
-                    if j < self.grid_size - 1 and int(self.grid[CHANNEL_TYPE, i, j + 1].item()) == TYPE_EMPTY:
-                        empty_neighbors.append((i, j + 1))
-                    
-                    # Si on a des voisins vides, diffuser le gaz
-                    if empty_neighbors:
-                        nb_parts = len(empty_neighbors) + 1
-                        density_per_part = current_density / nb_parts
-                        
-                        # Nouvelle densité dans la cellule actuelle
-                        new_grid[CHANNEL_DENSITY, i, j] = density_per_part
-                        
-                        # Distribuer aux voisins vides (ils deviennent du GAZ)
-                        for ni, nj in empty_neighbors:
-                            new_grid[CHANNEL_TYPE, ni, nj] = TYPE_GAS
-                            new_grid[CHANNEL_DENSITY, ni, nj] = density_per_part
+                current_type = int(new_grid[CHANNEL_TYPE, i, j].item())
+                if current_type == TYPE_GAS:
+                    gas_positions.append((i, j))
+                    total_gas_density += new_grid[CHANNEL_DENSITY, i, j].item()
+                    highest_gas_row = min(highest_gas_row, i)
+        
+        if not gas_positions:
+            return
+            
+        # 2. Trouver les cases vides disponibles (seulement au-dessus du gaz)
+        empty_positions = []
+        for i in range(highest_gas_row + 1):  # On ne cherche que jusqu'à la hauteur du gaz
+            for j in range(self.grid_size):
+                current_type = int(new_grid[CHANNEL_TYPE, i, j].item())
+                if current_type == TYPE_EMPTY:
+                    empty_positions.append((i, j))
+        
+        if not empty_positions:
+            return
+        
+        # 3. Vider toutes les cases de gaz
+        for i, j in gas_positions:
+            new_grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
+            new_grid[CHANNEL_DENSITY, i, j] = 0.0
+        
+        # 4. Répartir uniformément le gaz dans les cases disponibles
+        total_available_cells = len(gas_positions) + len(empty_positions)
+        density_per_cell = total_gas_density / total_available_cells
+        
+        for i, j in gas_positions + empty_positions:
+            new_grid[CHANNEL_TYPE, i, j] = TYPE_GAS
+            new_grid[CHANNEL_DENSITY, i, j] = density_per_cell
         
         self.grid = new_grid
     
@@ -264,9 +271,9 @@ class FluidSimulation:
         PHASE 5 : CONDENSATION DE L'EAU
 
         L'eau cherche à se condenser vers le bas :
-        1. On cumule les densités par colonne
-        2. On remplit les cases du bas vers le haut
-        3. Les cases qui se vident redeviennent VIDES
+        1. On cumule les densités totales
+        2. On remplit les lignes du bas vers le haut
+        3. Si une ligne est bloquée par du gaz, on continue à chercher plus haut
         """
         new_grid = self.grid.clone()
         
@@ -280,9 +287,11 @@ class FluidSimulation:
                     water_positions.append((i, j))
                     total_water_density += new_grid[CHANNEL_DENSITY, i, j].item()
         
+        print(f"DEBUG WATER - Avant condensation: {len(water_positions)} cases eau, densité totale={total_water_density:.2f}")
+        
         if not water_positions:
             return
-        
+            
         # 2. Vider toutes les cases d'eau
         for i, j in water_positions:
             new_grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
@@ -292,11 +301,14 @@ class FluidSimulation:
         full_lines = int(total_water_density / self.grid_size)
         remaining_density = total_water_density - (full_lines * self.grid_size)
         
-        # 4. Remplir depuis le bas, en commençant par la dernière ligne
+        print(f"DEBUG WATER - Lignes complètes possibles: {full_lines}, densité restante={remaining_density:.2f}")
+        
+        # 4. Remplir depuis le bas, en cherchant des lignes libres
         current_row = self.grid_size - 1
         lines_filled = 0
+        density_placed = 0.0
         
-        # Remplir les lignes complètes
+        # D'abord les lignes complètes
         while lines_filled < full_lines and current_row >= 0:
             # Vérifier si la ligne est libre (pas de gaz)
             line_has_gas = False
@@ -310,25 +322,46 @@ class FluidSimulation:
                 for j in range(self.grid_size):
                     new_grid[CHANNEL_TYPE, current_row, j] = TYPE_WATER
                     new_grid[CHANNEL_DENSITY, current_row, j] = 1.0
+                    density_placed += 1.0
                 lines_filled += 1
             
             current_row -= 1
         
-        # 5. S'il reste de la densité, la répartir sur une ligne supplémentaire
-        if remaining_density > 0 and current_row >= 0:
-            # Vérifier si la ligne est libre
-            line_has_gas = False
-            for j in range(self.grid_size):
-                if int(new_grid[CHANNEL_TYPE, current_row, j].item()) == TYPE_GAS:
-                    line_has_gas = True
-                    break
-            
-            if not line_has_gas:
-                # Répartir la densité restante uniformément
-                density_per_cell = remaining_density / self.grid_size
+        print(f"DEBUG WATER - Après lignes pleines: {lines_filled} lignes remplies, densité placée={density_placed:.2f}")
+        
+        # 5. S'il reste des lignes complètes à placer, chercher plus haut
+        while lines_filled < full_lines and current_row >= 0:
+            if all(int(new_grid[CHANNEL_TYPE, current_row, j].item()) != TYPE_GAS for j in range(self.grid_size)):
                 for j in range(self.grid_size):
                     new_grid[CHANNEL_TYPE, current_row, j] = TYPE_WATER
-                    new_grid[CHANNEL_DENSITY, current_row, j] = density_per_cell
+                    new_grid[CHANNEL_DENSITY, current_row, j] = 1.0
+                    density_placed += 1.0
+                lines_filled += 1
+            current_row -= 1
+        
+        # 6. S'il reste de la densité, chercher la première ligne libre depuis le bas
+        if remaining_density > 0:
+            current_row = self.grid_size - 1
+            while current_row >= 0:
+                if all(int(new_grid[CHANNEL_TYPE, current_row, j].item()) != TYPE_GAS for j in range(self.grid_size)):
+                    density_per_cell = remaining_density / self.grid_size
+                    for j in range(self.grid_size):
+                        new_grid[CHANNEL_TYPE, current_row, j] = TYPE_WATER
+                        new_grid[CHANNEL_DENSITY, current_row, j] = density_per_cell
+                        density_placed += density_per_cell
+                    break
+                current_row -= 1
+        
+        # Vérification finale
+        final_water_density = 0.0
+        final_water_cells = 0
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                if int(new_grid[CHANNEL_TYPE, i, j].item()) == TYPE_WATER:
+                    final_water_cells += 1
+                    final_water_density += new_grid[CHANNEL_DENSITY, i, j].item()
+        
+        print(f"DEBUG WATER - Final: {final_water_cells} cases eau, densité totale={final_water_density:.2f} (attendu={total_water_density:.2f})")
         
         self.grid = new_grid
     
@@ -515,4 +548,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
