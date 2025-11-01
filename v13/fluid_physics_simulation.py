@@ -216,52 +216,49 @@ class FluidSimulation:
         """
         PHASE 4 : DIFFUSION DU GAZ
         
-        Le gaz se diffuse uniformément vers le haut :
-        1. On calcule d'abord la densité totale du gaz
-        2. On compte les cases vides au-dessus du gaz le plus haut
-        3. On répartit uniformément le gaz dans les cases disponibles
+        Le gaz se diffuse dans son voisinage 3x3 VIDE uniquement :
+        1. Pour chaque cellule de gaz, on analyse son voisinage 3x3
+        2. On compte uniquement les cellules VIDES dans ce voisinage
+        3. On répartit la densité uniformément entre la cellule source et ses voisins VIDES
         """
         new_grid = self.grid.clone()
         
-        # 1. Calculer la densité totale de gaz et trouver la position du gaz
-        total_gas_density = 0.0
-        gas_positions = []
-        highest_gas_row = self.grid_size  # Plus haute position du gaz
-        
+        # Phase de diffusion
         for i in range(self.grid_size):
             for j in range(self.grid_size):
-                current_type = int(new_grid[CHANNEL_TYPE, i, j].item())
-                if current_type == TYPE_GAS:
-                    gas_positions.append((i, j))
-                    total_gas_density += new_grid[CHANNEL_DENSITY, i, j].item()
-                    highest_gas_row = min(highest_gas_row, i)
-        
-        if not gas_positions:
-            return
-            
-        # 2. Trouver les cases vides disponibles (seulement au-dessus du gaz)
-        empty_positions = []
-        for i in range(highest_gas_row + 1):  # On ne cherche que jusqu'à la hauteur du gaz
-            for j in range(self.grid_size):
-                current_type = int(new_grid[CHANNEL_TYPE, i, j].item())
-                if current_type == TYPE_EMPTY:
-                    empty_positions.append((i, j))
-        
-        if not empty_positions:
-            return
-        
-        # 3. Vider toutes les cases de gaz
-        for i, j in gas_positions:
-            new_grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
-            new_grid[CHANNEL_DENSITY, i, j] = 0.0
-        
-        # 4. Répartir uniformément le gaz dans les cases disponibles
-        total_available_cells = len(gas_positions) + len(empty_positions)
-        density_per_cell = total_gas_density / total_available_cells
-        
-        for i, j in gas_positions + empty_positions:
-            new_grid[CHANNEL_TYPE, i, j] = TYPE_GAS
-            new_grid[CHANNEL_DENSITY, i, j] = density_per_cell
+                if int(new_grid[CHANNEL_TYPE, i, j].item()) == TYPE_GAS:
+                    current_density = new_grid[CHANNEL_DENSITY, i, j].item()
+                    if current_density == 0:
+                        continue
+                    
+                    # Analyser le voisinage 3x3
+                    empty_neighbors = []
+                    for di in [-1, 0, 1]:
+                        for dj in [-1, 0, 1]:
+                            # Ne pas considérer la cellule centrale
+                            if di == 0 and dj == 0:
+                                continue
+                                
+                            ni, nj = i + di, j + dj
+                            # Vérifier les limites de la grille
+                            if (0 <= ni < self.grid_size and
+                                0 <= nj < self.grid_size):
+                                # Uniquement les cellules VIDES
+                                if int(new_grid[CHANNEL_TYPE, ni, nj].item()) == TYPE_EMPTY:
+                                    empty_neighbors.append((ni, nj))
+                    
+                    if empty_neighbors:
+                        # Répartir la densité entre la cellule source et les voisins vides
+                        total_cells = len(empty_neighbors) + 1  # +1 pour la cellule source
+                        density_per_cell = current_density / total_cells
+                        
+                        # Mettre à jour la cellule source
+                        new_grid[CHANNEL_DENSITY, i, j] = density_per_cell
+                        
+                        # Mettre à jour les voisins vides
+                        for ni, nj in empty_neighbors:
+                            new_grid[CHANNEL_TYPE, ni, nj] = TYPE_GAS
+                            new_grid[CHANNEL_DENSITY, ni, nj] = density_per_cell
         
         self.grid = new_grid
     
