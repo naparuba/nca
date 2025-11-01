@@ -285,7 +285,6 @@ class BaseStage(ABC):
         # Position aléatoire de la source
         sources_pos = []
         n_sources = get_random_int(self.MIN_SOURCES_NB, self.MAX_SOURCES_NB + 1)
-        print(f'n_sources: {n_sources}')
         for _ in range(n_sources):
             i0 = get_random_int(2, size - 2)
             j0 = get_random_int(2, size - 2)
