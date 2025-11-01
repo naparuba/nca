@@ -258,6 +258,80 @@ class FluidSimulation:
         
         self.grid = new_grid
     
+    
+    def _apply_water_condensation(self):
+        """
+        PHASE 5 : CONDENSATION DE L'EAU
+
+        L'eau cherche à se condenser vers le bas :
+        1. On cumule les densités par colonne
+        2. On remplit les cases du bas vers le haut
+        3. Les cases qui se vident redeviennent VIDES
+        """
+        new_grid = self.grid.clone()
+        
+        # 1. Calculer la densité totale d'eau et identifier toutes les cases d'eau
+        total_water_density = 0.0
+        water_positions = []
+        
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                if int(new_grid[CHANNEL_TYPE, i, j].item()) == TYPE_WATER:
+                    water_positions.append((i, j))
+                    total_water_density += new_grid[CHANNEL_DENSITY, i, j].item()
+        
+        if not water_positions:
+            return
+        
+        # 2. Vider toutes les cases d'eau
+        for i, j in water_positions:
+            new_grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
+            new_grid[CHANNEL_DENSITY, i, j] = 0.0
+        
+        # 3. Calculer le nombre de lignes complètes possibles
+        full_lines = int(total_water_density / self.grid_size)
+        remaining_density = total_water_density - (full_lines * self.grid_size)
+        
+        # 4. Remplir depuis le bas, en commençant par la dernière ligne
+        current_row = self.grid_size - 1
+        lines_filled = 0
+        
+        # Remplir les lignes complètes
+        while lines_filled < full_lines and current_row >= 0:
+            # Vérifier si la ligne est libre (pas de gaz)
+            line_has_gas = False
+            for j in range(self.grid_size):
+                if int(new_grid[CHANNEL_TYPE, current_row, j].item()) == TYPE_GAS:
+                    line_has_gas = True
+                    break
+            
+            if not line_has_gas:
+                # Remplir toute la ligne avec de l'eau
+                for j in range(self.grid_size):
+                    new_grid[CHANNEL_TYPE, current_row, j] = TYPE_WATER
+                    new_grid[CHANNEL_DENSITY, current_row, j] = 1.0
+                lines_filled += 1
+            
+            current_row -= 1
+        
+        # 5. S'il reste de la densité, la répartir sur une ligne supplémentaire
+        if remaining_density > 0 and current_row >= 0:
+            # Vérifier si la ligne est libre
+            line_has_gas = False
+            for j in range(self.grid_size):
+                if int(new_grid[CHANNEL_TYPE, current_row, j].item()) == TYPE_GAS:
+                    line_has_gas = True
+                    break
+            
+            if not line_has_gas:
+                # Répartir la densité restante uniformément
+                density_per_cell = remaining_density / self.grid_size
+                for j in range(self.grid_size):
+                    new_grid[CHANNEL_TYPE, current_row, j] = TYPE_WATER
+                    new_grid[CHANNEL_DENSITY, current_row, j] = density_per_cell
+        
+        self.grid = new_grid
+    
     def step(self):
         """
         Un pas de simulation.
@@ -267,11 +341,13 @@ class FluidSimulation:
         2. Flottabilité : GAZ monte
         3. Débordement latéral : EAU s'étale
         4. Diffusion du gaz : GAZ se répartit dans le VIDE
+        5. Condensation : l'EAU se condense vers le bas
         """
         self._apply_gravity()
         self._apply_buoyancy()
         self._apply_lateral_flow()
         self._apply_gas_diffusion()
+        self._apply_water_condensation()
     
     def _get_stats(self) -> Tuple[int, int, int]:
         """
@@ -367,7 +443,7 @@ class FluidSimulation:
                         visual_grid[i, j] = [1.0, 1.0, 1.0 - cell_density * 0.7]
                     else:  # TYPE_WATER
                         # Bleu
-                        visual_grid[i, j] = [0.0, 0.4, 0.8 - cell_density * 0.7]
+                        visual_grid[i, j] = [0.0, cell_density , cell_density ]
             
             im = ax.imshow(visual_grid, origin='upper', interpolation='nearest')
             
