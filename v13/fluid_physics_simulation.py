@@ -17,8 +17,8 @@ Approche :
 from pathlib import Path
 from typing import List, Tuple
 
-import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -28,19 +28,20 @@ N_STEPS = 200
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # TYPES DE CELLULES (valeurs entières discrètes)
-TYPE_EMPTY = 0   # Vide (rien)
-TYPE_GAS = 1     # Gaz léger
-TYPE_WATER = 2   # Eau dense
+TYPE_EMPTY = 0  # Vide (rien)
+TYPE_GAS = 1  # Gaz léger
+TYPE_WATER = 2  # Eau dense
 
 # Indices des canaux
-CHANNEL_TYPE = 0      # Canal du type de cellule
-CHANNEL_DENSITY = 1   # Canal de la densité
+CHANNEL_TYPE = 0  # Canal du type de cellule
+CHANNEL_DENSITY = 1  # Canal de la densité
 
 
 class FluidSimulation:
     """
     Simulateur de fluides avec types discrets et densités continues.
     """
+    
     
     def __init__(self, grid_size: int = GRID_SIZE):
         self.grid_size = grid_size
@@ -53,6 +54,7 @@ class FluidSimulation:
         # Historique pour visualisation (on stocke tout)
         self.history: List[torch.Tensor] = []
     
+    
     def _print_grid_ascii(self, title: str = "Grille"):
         """
         Affiche la grille en ASCII pour debug.
@@ -62,9 +64,9 @@ class FluidSimulation:
         - '0-9' = GAZ (chiffre = densité)
         - '#' = EAU
         """
-        print(f"\n{'='*40}")
+        print(f"\n{'=' * 40}")
         print(f"{title}")
-        print(f"{'='*40}")
+        print(f"{'=' * 40}")
         
         for i in range(self.grid_size):
             row = []
@@ -85,8 +87,10 @@ class FluidSimulation:
         total_gas_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
         total_water_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
         
-        print(f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
-        print(f"{'='*40}\n")
+        print(
+            f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
+        print(f"{'=' * 40}\n")
+    
     
     def initialize_scenario_1(self):
         """
@@ -103,6 +107,7 @@ class FluidSimulation:
         self.grid[CHANNEL_DENSITY, 10:14, 2:14] = 1.0
         
         print("🌊 Scénario 1 initialisé : Bloc d'eau en haut, gaz en bas")
+    
     
     def _apply_gravity(self):
         """
@@ -132,6 +137,7 @@ class FluidSimulation:
         
         self.grid = new_grid
     
+    
     def _apply_buoyancy(self):
         """
         PHASE 2 : FLOTTABILITÉ
@@ -158,6 +164,7 @@ class FluidSimulation:
                     new_grid[CHANNEL_DENSITY, i - 1, j] = temp_density
         
         self.grid = new_grid
+    
     
     def _apply_lateral_flow(self):
         """
@@ -212,14 +219,16 @@ class FluidSimulation:
         
         self.grid = new_grid
     
+    
     def _apply_gas_diffusion(self):
         """
         PHASE 4 : DIFFUSION DU GAZ
         
         Le gaz se diffuse dans son voisinage 3x3 VIDE uniquement :
         1. Pour chaque cellule de gaz, on analyse son voisinage 3x3
-        2. On compte uniquement les cellules VIDES dans ce voisinage
+        2. On compte seulement les cellules VIDES dans ce voisinage
         3. On répartit la densité uniformément entre la cellule source et ses voisins VIDES
+        4. TODO: étalement entre les cases de gaz adjacentes
         """
         new_grid = self.grid.clone()
         
@@ -238,11 +247,11 @@ class FluidSimulation:
                             # Ne pas considérer la cellule centrale
                             if di == 0 and dj == 0:
                                 continue
-                                
+                            
                             ni, nj = i + di, j + dj
                             # Vérifier les limites de la grille
                             if (0 <= ni < self.grid_size and
-                                0 <= nj < self.grid_size):
+                                    0 <= nj < self.grid_size):
                                 # Uniquement les cellules VIDES
                                 if int(new_grid[CHANNEL_TYPE, ni, nj].item()) == TYPE_EMPTY:
                                     empty_neighbors.append((ni, nj))
@@ -284,11 +293,9 @@ class FluidSimulation:
                     water_positions.append((i, j))
                     total_water_density += new_grid[CHANNEL_DENSITY, i, j].item()
         
-        print(f"DEBUG WATER - Avant condensation: {len(water_positions)} cases eau, densité totale={total_water_density:.2f}")
-        
         if not water_positions:
             return
-            
+        
         # 2. Vider toutes les cases d'eau
         for i, j in water_positions:
             new_grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
@@ -297,8 +304,6 @@ class FluidSimulation:
         # 3. Calculer le nombre de lignes complètes possibles
         full_lines = int(total_water_density / self.grid_size)
         remaining_density = total_water_density - (full_lines * self.grid_size)
-        
-        print(f"DEBUG WATER - Lignes complètes possibles: {full_lines}, densité restante={remaining_density:.2f}")
         
         # 4. Remplir depuis le bas, en cherchant des lignes libres
         current_row = self.grid_size - 1
@@ -323,8 +328,6 @@ class FluidSimulation:
                 lines_filled += 1
             
             current_row -= 1
-        
-        print(f"DEBUG WATER - Après lignes pleines: {lines_filled} lignes remplies, densité placée={density_placed:.2f}")
         
         # 5. S'il reste des lignes complètes à placer, chercher plus haut
         while lines_filled < full_lines and current_row >= 0:
@@ -358,9 +361,8 @@ class FluidSimulation:
                     final_water_cells += 1
                     final_water_density += new_grid[CHANNEL_DENSITY, i, j].item()
         
-        print(f"DEBUG WATER - Final: {final_water_cells} cases eau, densité totale={final_water_density:.2f} (attendu={total_water_density:.2f})")
-        
         self.grid = new_grid
+    
     
     def step(self):
         """
@@ -399,6 +401,7 @@ class FluidSimulation:
         self._apply_water_condensation()
         self._check_mass_conservation("condensation de l'eau")
     
+    
     def _get_stats(self) -> Tuple[int, int, int]:
         """
         Compte le nombre de cellules de chaque type.
@@ -413,6 +416,7 @@ class FluidSimulation:
         water_count = (type_grid == TYPE_WATER).sum().item()
         
         return int(empty_count), int(gas_count), int(water_count)
+    
     
     def simulate(self, n_steps: int = N_STEPS, record_every: int = 1):
         """
@@ -452,6 +456,7 @@ class FluidSimulation:
         
         print(f"✅ Simulation terminée ! {len(self.history)} frames enregistrées")
     
+    
     def save_animation(self, output_path: str = "outputs/fluid_simulation.gif", max_frames: int = 50):
         """
         Sauvegarde une animation GIF de la simulation.
@@ -473,6 +478,7 @@ class FluidSimulation:
         # Créer la figure
         fig, ax = plt.subplots(figsize=(8, 8))
         
+        
         def animate(frame_idx):
             ax.clear()
             grid_frame = frames_to_plot[frame_idx].numpy()
@@ -493,13 +499,13 @@ class FluidSimulation:
                         visual_grid[i, j] = [1.0, 1.0, 1.0 - cell_density * 0.7]
                     else:  # TYPE_WATER
                         # Bleu
-                        visual_grid[i, j] = [0.0, cell_density , cell_density ]
+                        visual_grid[i, j] = [0.0, cell_density, cell_density]
             
             im = ax.imshow(visual_grid, origin='upper', interpolation='nearest')
             
             ax.set_title(f'Simulation de Fluides - Frame {frame_idx * step_size}/{len(self.history)}\n'
-                        f'Blanc=VIDE | Jaune=GAZ | Bleu=EAU',
-                        fontsize=12, fontweight='bold')
+                         f'Blanc=VIDE | Jaune=GAZ | Bleu=EAU',
+                         fontsize=12, fontweight='bold')
             ax.set_xlabel('Position X', fontsize=10)
             ax.set_ylabel('Position Y (gravité ↓)', fontsize=10)
             
@@ -515,15 +521,16 @@ class FluidSimulation:
             nb_water = int((type_grid == TYPE_WATER).sum())
             
             ax.text(0.02, 0.98, f'VIDE: {nb_empty} | GAZ: {nb_gas} | EAU: {nb_water}',
-                   transform=ax.transAxes, fontsize=10,
-                   verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                    transform=ax.transAxes, fontsize=10,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
             
             return [im]
         
+        
         # Créer l'animation
         anim = animation.FuncAnimation(fig, animate, frames=len(frames_to_plot),
-                                      interval=100, blit=False)
+                                       interval=100, blit=False)
         
         # Créer le dossier de sortie
         output_path_obj = Path(output_path)
@@ -554,7 +561,7 @@ class FluidSimulation:
             self._initial_gas = current_gas
             self._initial_water = current_water
             return
-            
+        
         # Vérification avec une tolérance pour les erreurs de calcul flottant
         gas_diff = abs(current_gas - self._initial_gas)
         water_diff = abs(current_water - self._initial_water)
@@ -574,7 +581,7 @@ EAU:
 - Diff:    {water_diff:.10f}
 """
             raise RuntimeError(error_msg)
-        
+
 
 def main():
     """
