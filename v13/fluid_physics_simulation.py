@@ -352,8 +352,9 @@ class FluidSimulation:
         - La case au-dessus est VIDE ou GAZ
         - Si c'est GAZ, la densité après fusion doit rester < 1.0
         
-        PHASE 2 : Concentration vers le bas
+        PHASE 2 : Concentration vers le bas ET vers les côtés
         4. Pour chaque cellule d'eau, on regarde les 3 cases en dessous (gauche, centre, droite)
+           ET les 2 cases sur les côtés (gauche, droite)
         5. Si c'est de l'eau avec densité < 1.0, on transfère la densité
         6. Si on a tout donné, on devient VIDE
         """
@@ -450,31 +451,42 @@ class FluidSimulation:
                     continue
                 
                 # Chercher les 3 cases en dessous (gauche, centre, droite)
-                water_below = []
+                water_targets = []
                 
                 if i < self.grid_size - 1:
                     # En dessous à gauche
                     if j > 0:
                         if int(new_grid[CHANNEL_TYPE, i + 1, j - 1].item()) == TYPE_WATER:
-                            water_below.append((i + 1, j - 1))
+                            water_targets.append((i + 1, j - 1))
                     
                     # En dessous au centre
                     if int(new_grid[CHANNEL_TYPE, i + 1, j].item()) == TYPE_WATER:
-                        water_below.append((i + 1, j))
+                        water_targets.append((i + 1, j))
                     
                     # En dessous à droite
                     if j < self.grid_size - 1:
                         if int(new_grid[CHANNEL_TYPE, i + 1, j + 1].item()) == TYPE_WATER:
-                            water_below.append((i + 1, j + 1))
+                            water_targets.append((i + 1, j + 1))
                 
-                # Transférer la densité aux cases d'eau en dessous non saturées
-                for wi, wj in water_below:
-                    below_density = new_grid[CHANNEL_DENSITY, wi, wj].item()
+                # Chercher les 2 cases sur les côtés (gauche, droite)
+                # Côté gauche
+                if j > 0:
+                    if int(new_grid[CHANNEL_TYPE, i, j - 1].item()) == TYPE_WATER:
+                        water_targets.append((i, j - 1))
+                
+                # Côté droit
+                if j < self.grid_size - 1:
+                    if int(new_grid[CHANNEL_TYPE, i, j + 1].item()) == TYPE_WATER:
+                        water_targets.append((i, j + 1))
+                
+                # Transférer la densité aux cases d'eau cibles non saturées
+                for wi, wj in water_targets:
+                    target_density = new_grid[CHANNEL_DENSITY, wi, wj].item()
                     
-                    # Si la case en dessous n'est pas saturée
-                    if below_density < 1.0:
+                    # Si la case cible n'est pas saturée
+                    if target_density < 1.0:
                         # Calculer combien on peut transférer
-                        space_available = 1.0 - below_density
+                        space_available = 1.0 - target_density
                         transfer_amount = min(current_density, space_available)
                         
                         # Transférer
