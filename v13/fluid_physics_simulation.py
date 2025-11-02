@@ -74,8 +74,12 @@ class FluidSimulation:
             
             # Calculer la densité moyenne de la ligne
             line_density_avg = self.grid[CHANNEL_DENSITY, i, :].mean().item()
+            # Max density on the line:
+            line_density_max = self.grid[CHANNEL_DENSITY, i, :].max().item()
+            # Minumim density, but not the 0.0 ones:
+            non_zero_densities = self.grid[CHANNEL_DENSITY, i, :][self.grid[CHANNEL_DENSITY, i, :] > 0.0].min().item()
             
-            print(f"Ligne {i:2d}: {''.join(row)}  | Densité moy: {line_density_avg:.4f}")
+            print(f"Ligne {i:2d}: {''.join(row)}  | Densité moy: {line_density_avg:.4f}  Max:{line_density_max:.4f}  Min:{non_zero_densities:.4f}")
         
         # Afficher les stats
         nb_empty, nb_gas, nb_water = self._get_stats()
@@ -83,7 +87,7 @@ class FluidSimulation:
         total_water_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
         
         print(
-            f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
+                f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
         print(f"{'=' * 40}\n")
     
     
@@ -177,100 +181,102 @@ class FluidSimulation:
                 current_type = int(new_grid[CHANNEL_TYPE, i, j].item())
                 
                 # Si c'est de l'EAU
-                if current_type == TYPE_WATER:
-                    current_density = new_grid[CHANNEL_DENSITY, i, j].item()
-                    available_slots = []
-                    
-                    # 1. Cases vides en dessous (gravité)
-                    if i < self.grid_size - 1:
+                if current_type != TYPE_WATER:
+                    continue
+                
+                current_density = new_grid[CHANNEL_DENSITY, i, j].item()
+                available_slots = []
+                
+                # 1. Cases vides en dessous (gravité)
+                if i < self.grid_size - 1:
+                    below_type = int(new_grid[CHANNEL_TYPE, i + 1, j].item())
+                    if below_type == TYPE_EMPTY:
+                        available_slots.append((i + 1, j))
+                
+                # 2. TOUJOURS chercher le vide sur les côtés (PAS de condition "if not available_slots")
+                # Côtés gauche et droite
+                if j > 0 and int(new_grid[CHANNEL_TYPE, i, j - 1].item()) == TYPE_EMPTY:
+                    available_slots.append((i, j - 1))
+                if j < self.grid_size - 1 and int(new_grid[CHANNEL_TYPE, i, j + 1].item()) == TYPE_EMPTY:
+                    available_slots.append((i, j + 1))
+                
+                # 3. Diagonales vers le bas
+                if i < self.grid_size - 1:
+                    # En bas à gauche
+                    if j > 0 and int(new_grid[CHANNEL_TYPE, i + 1, j - 1].item()) == TYPE_EMPTY:
+                        available_slots.append((i + 1, j - 1))
+                    # En bas à droite
+                    if j < self.grid_size - 1 and int(new_grid[CHANNEL_TYPE, i + 1, j + 1].item()) == TYPE_EMPTY:
+                        available_slots.append((i + 1, j + 1))
+                
+                # 4. Si AUCUNE case vide, essayer de pousser le gaz (débordement forcé)
+                if not available_slots:
+                    # Vérifier si bloquée en dessous
+                    is_blocked = False
+                    if i == self.grid_size - 1:
+                        is_blocked = True
+                    else:
                         below_type = int(new_grid[CHANNEL_TYPE, i + 1, j].item())
-                        if below_type == TYPE_EMPTY:
-                            available_slots.append((i + 1, j))
-                    
-                    # 2. TOUJOURS chercher le vide sur les côtés (PAS de condition "if not available_slots")
-                    # Côtés gauche et droite
-                    if j > 0 and int(new_grid[CHANNEL_TYPE, i, j - 1].item()) == TYPE_EMPTY:
-                        available_slots.append((i, j - 1))
-                    if j < self.grid_size - 1 and int(new_grid[CHANNEL_TYPE, i, j + 1].item()) == TYPE_EMPTY:
-                        available_slots.append((i, j + 1))
-                    
-                    # 3. Diagonales vers le bas
-                    if i < self.grid_size - 1:
-                        # En bas à gauche
-                        if j > 0 and int(new_grid[CHANNEL_TYPE, i + 1, j - 1].item()) == TYPE_EMPTY:
-                            available_slots.append((i + 1, j - 1))
-                        # En bas à droite
-                        if j < self.grid_size - 1 and int(new_grid[CHANNEL_TYPE, i + 1, j + 1].item()) == TYPE_EMPTY:
-                            available_slots.append((i + 1, j + 1))
-                    
-                    # 4. Si AUCUNE case vide, essayer de pousser le gaz (débordement forcé)
-                    if not available_slots:
-                        # Vérifier si bloquée en dessous
-                        is_blocked = False
-                        if i == self.grid_size - 1:
+                        if below_type == TYPE_WATER:
                             is_blocked = True
-                        else:
-                            below_type = int(new_grid[CHANNEL_TYPE, i + 1, j].item())
-                            if below_type == TYPE_WATER:
-                                is_blocked = True
-                        
-                        if is_blocked:
-                            # Chercher les cases de GAZ qu'on peut pousser
-                            for dj, side_j in [(-1, j - 1), (1, j + 1)]:
-                                if 0 <= side_j < self.grid_size:
-                                    side_type = int(new_grid[CHANNEL_TYPE, i, side_j].item())
-                                    
-                                    if side_type == TYPE_GAS:
-                                        # Case de GAZ : vérifier si on peut le pousser vers le haut
-                                        gas_density = new_grid[CHANNEL_DENSITY, i, side_j].item()
-                                        
-                                        # Vérifier la case au-dessus
-                                        if i > 0:  # Il y a une case au-dessus
-                                            above_type = int(new_grid[CHANNEL_TYPE, i - 1, side_j].item())
-                                            
-                                            if above_type == TYPE_EMPTY:
-                                                # Case vide au-dessus : on peut pousser
-                                                available_slots.append((i, side_j))
-                                            elif above_type == TYPE_GAS:
-                                                # Case de gaz au-dessus : vérifier la capacité
-                                                above_density = new_grid[CHANNEL_DENSITY, i - 1, side_j].item()
-                                                if above_density + gas_density <= 1.0:
-                                                    # Assez de place pour fusionner les densités
-                                                    available_slots.append((i, side_j))
                     
-                    # Appliquer le déversement/débordement s'il y a des cases disponibles
-                    if available_slots:
-                        # Calculer la nouvelle densité (répartie équitablement)
-                        new_density = current_density / (len(available_slots) + 1)
-                        
-                        # Mettre à jour la densité de la case courante
-                        new_grid[CHANNEL_DENSITY, i, j] = new_density
-                        
-                        # Répartir dans les cases disponibles
-                        for ni, nj in available_slots:
-                            slot_type = int(new_grid[CHANNEL_TYPE, ni, nj].item())
-                            
-                            if slot_type == TYPE_EMPTY:
-                                # Case vide : simple déversement
-                                new_grid[CHANNEL_TYPE, ni, nj] = TYPE_WATER
-                                new_grid[CHANNEL_DENSITY, ni, nj] = new_density
-                            
-                            elif slot_type == TYPE_GAS:
-                                # Case de gaz : pousser le gaz vers le haut
-                                gas_density = new_grid[CHANNEL_DENSITY, ni, nj].item()
-                                above_type = int(new_grid[CHANNEL_TYPE, ni - 1, nj].item())
+                    if is_blocked:
+                        # Chercher les cases de GAZ qu'on peut pousser
+                        for dj, side_j in [(-1, j - 1), (1, j + 1)]:
+                            if 0 <= side_j < self.grid_size:
+                                side_type = int(new_grid[CHANNEL_TYPE, i, side_j].item())
                                 
-                                if above_type == TYPE_EMPTY:
-                                    # Déplacer le gaz vers le haut
-                                    new_grid[CHANNEL_TYPE, ni - 1, nj] = TYPE_GAS
-                                    new_grid[CHANNEL_DENSITY, ni - 1, nj] = gas_density
-                                elif above_type == TYPE_GAS:
-                                    # Fusionner avec le gaz au-dessus
-                                    new_grid[CHANNEL_DENSITY, ni - 1, nj] += gas_density
-                                
-                                # Remplacer la case actuelle par de l'eau
-                                new_grid[CHANNEL_TYPE, ni, nj] = TYPE_WATER
-                                new_grid[CHANNEL_DENSITY, ni, nj] = new_density
+                                if side_type == TYPE_GAS:
+                                    # Case de GAZ : vérifier si on peut le pousser vers le haut
+                                    gas_density = new_grid[CHANNEL_DENSITY, i, side_j].item()
+                                    
+                                    # Vérifier la case au-dessus
+                                    if i > 0:  # Il y a une case au-dessus
+                                        above_type = int(new_grid[CHANNEL_TYPE, i - 1, side_j].item())
+                                        
+                                        if above_type == TYPE_EMPTY:
+                                            # Case vide au-dessus : on peut pousser
+                                            available_slots.append((i, side_j))
+                                        elif above_type == TYPE_GAS:
+                                            # Case de gaz au-dessus : vérifier la capacité
+                                            above_density = new_grid[CHANNEL_DENSITY, i - 1, side_j].item()
+                                            if above_density + gas_density <= 1.0:
+                                                # Assez de place pour fusionner les densités
+                                                available_slots.append((i, side_j))
+                
+                # Appliquer le déversement/débordement s'il y a des cases disponibles
+                if available_slots:
+                    # Calculer la nouvelle densité (répartie équitablement)
+                    new_density = current_density / (len(available_slots) + 1)
+                    
+                    # Mettre à jour la densité de la case courante
+                    new_grid[CHANNEL_DENSITY, i, j] = new_density
+                    
+                    # Répartir dans les cases disponibles
+                    for ni, nj in available_slots:
+                        slot_type = int(new_grid[CHANNEL_TYPE, ni, nj].item())
+                        
+                        if slot_type == TYPE_EMPTY:
+                            # Case vide : simple déversement
+                            new_grid[CHANNEL_TYPE, ni, nj] = TYPE_WATER
+                            new_grid[CHANNEL_DENSITY, ni, nj] = new_density
+                        
+                        elif slot_type == TYPE_GAS:
+                            # Case de gaz : pousser le gaz vers le haut
+                            gas_density = new_grid[CHANNEL_DENSITY, ni, nj].item()
+                            above_type = int(new_grid[CHANNEL_TYPE, ni - 1, nj].item())
+                            
+                            if above_type == TYPE_EMPTY:
+                                # Déplacer le gaz vers le haut
+                                new_grid[CHANNEL_TYPE, ni - 1, nj] = TYPE_GAS
+                                new_grid[CHANNEL_DENSITY, ni - 1, nj] = gas_density
+                            elif above_type == TYPE_GAS:
+                                # Fusionner avec le gaz au-dessus
+                                new_grid[CHANNEL_DENSITY, ni - 1, nj] += gas_density
+                            
+                            # Remplacer la case actuelle par de l'eau
+                            new_grid[CHANNEL_TYPE, ni, nj] = TYPE_WATER
+                            new_grid[CHANNEL_DENSITY, ni, nj] = new_density
         
         self.grid = new_grid
     
@@ -286,7 +292,7 @@ class FluidSimulation:
         4. Ensuite, on égalise les densités entre cellules de GAZ adjacentes pour un étalement progressif
         """
         new_grid = self.grid.clone()
-
+        
         # Phase 1 : diffusion vers les cellules VIDES (inchangé)
         for i in range(self.grid_size):
             for j in range(self.grid_size):
@@ -294,7 +300,7 @@ class FluidSimulation:
                     current_density = new_grid[CHANNEL_DENSITY, i, j].item()
                     if current_density == 0:
                         continue
-
+                    
                     # Analyser le voisinage 3x3
                     empty_neighbors = []
                     for di in [-1, 0, 1]:
@@ -302,7 +308,7 @@ class FluidSimulation:
                             # Ne pas considérer la cellule centrale
                             if di == 0 and dj == 0:
                                 continue
-
+                            
                             ni, nj = i + di, j + dj
                             # Vérifier les limites de la grille
                             if (0 <= ni < self.grid_size and
@@ -310,20 +316,20 @@ class FluidSimulation:
                                 # Uniquement les cellules VIDES
                                 if int(new_grid[CHANNEL_TYPE, ni, nj].item()) == TYPE_EMPTY:
                                     empty_neighbors.append((ni, nj))
-
+                    
                     if empty_neighbors:
                         # Répartir la densité entre la cellule source et les voisins vides
                         total_cells = len(empty_neighbors) + 1  # +1 pour la cellule source
                         density_per_cell = current_density / total_cells
-
+                        
                         # Mettre à jour la cellule source
                         new_grid[CHANNEL_DENSITY, i, j] = density_per_cell
-
+                        
                         # Mettre à jour les voisins vides
                         for ni, nj in empty_neighbors:
                             new_grid[CHANNEL_TYPE, ni, nj] = TYPE_GAS
                             new_grid[CHANNEL_DENSITY, ni, nj] = density_per_cell
-
+        
         # Phase 2 : égalisation des densités entre cellules de GAZ adjacentes
         # On effectue plusieurs passes pour avoir une diffusion progressive
         # Coefficient de diffusion : 0.25 signifie qu'on transfert 25% de la différence
@@ -357,7 +363,7 @@ class FluidSimulation:
                         # Mettre à jour les densités
                         new_grid[CHANNEL_DENSITY, i, j] -= transfer_amount
                         new_grid[CHANNEL_DENSITY, ni, nj] += transfer_amount
-
+        
         self.grid = new_grid
     
     
