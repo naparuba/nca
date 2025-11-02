@@ -72,7 +72,10 @@ class FluidSimulation:
                 else:  # TYPE_WATER
                     row.append('O')
             
-            print(f"Ligne {i:2d}: {''.join(row)}")
+            # Calculer la densité moyenne de la ligne
+            line_density_avg = self.grid[CHANNEL_DENSITY, i, :].mean().item()
+            
+            print(f"Ligne {i:2d}: {''.join(row)}  | Densité moy: {line_density_avg:.4f}")
         
         # Afficher les stats
         nb_empty, nb_gas, nb_water = self._get_stats()
@@ -348,10 +351,15 @@ class FluidSimulation:
         Règle de push : on peut pousser le gaz vers le haut SI :
         - La case au-dessus est VIDE ou GAZ
         - Si c'est GAZ, la densité après fusion doit rester < 1.0
+        
+        PHASE 2 : Concentration vers le bas
+        4. Pour chaque cellule d'eau, on regarde les 3 cases en dessous (gauche, centre, droite)
+        5. Si c'est de l'eau avec densité < 1.0, on transfère la densité
+        6. Si on a tout donné, on devient VIDE
         """
         new_grid = self.grid.clone()
         
-        # Parcours de toutes les cellules d'eau
+        # PHASE 1 : Pousser le gaz vers le haut
         for i in range(self.grid_size):
             for j in range(self.grid_size):
                 # On ne traite que les cellules d'EAU
@@ -427,7 +435,115 @@ class FluidSimulation:
                         new_grid[CHANNEL_TYPE, fi, fj] = TYPE_WATER
                         new_grid[CHANNEL_DENSITY, fi, fj] = new_density
         
+        # PHASE 2 : Concentration vers le bas
+        # IMPORTANT: Parcours de HAUT EN BAS pour que les cellules du haut transfèrent vers le bas
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                # On ne traite que les cellules d'EAU
+                if int(new_grid[CHANNEL_TYPE, i, j].item()) != TYPE_WATER:
+                    continue
+                
+                current_density = new_grid[CHANNEL_DENSITY, i, j].item()
+                
+                # Si on n'a plus rien, passer
+                if current_density <= 0:
+                    continue
+                
+                # Chercher les 3 cases en dessous (gauche, centre, droite)
+                water_below = []
+                
+                if i < self.grid_size - 1:
+                    # En dessous à gauche
+                    if j > 0:
+                        if int(new_grid[CHANNEL_TYPE, i + 1, j - 1].item()) == TYPE_WATER:
+                            water_below.append((i + 1, j - 1))
+                    
+                    # En dessous au centre
+                    if int(new_grid[CHANNEL_TYPE, i + 1, j].item()) == TYPE_WATER:
+                        water_below.append((i + 1, j))
+                    
+                    # En dessous à droite
+                    if j < self.grid_size - 1:
+                        if int(new_grid[CHANNEL_TYPE, i + 1, j + 1].item()) == TYPE_WATER:
+                            water_below.append((i + 1, j + 1))
+                
+                # Transférer la densité aux cases d'eau en dessous non saturées
+                for wi, wj in water_below:
+                    below_density = new_grid[CHANNEL_DENSITY, wi, wj].item()
+                    
+                    # Si la case en dessous n'est pas saturée
+                    if below_density < 1.0:
+                        # Calculer combien on peut transférer
+                        space_available = 1.0 - below_density
+                        transfer_amount = min(current_density, space_available)
+                        
+                        # Transférer
+                        new_grid[CHANNEL_DENSITY, i, j] -= transfer_amount
+                        new_grid[CHANNEL_DENSITY, wi, wj] += transfer_amount
+                        current_density -= transfer_amount
+                        
+                        # Si on a tout donné, on arrête
+                        if current_density <= 0:
+                            break
+                
+                # Si on a tout donné, on devient VIDE
+                if new_grid[CHANNEL_DENSITY, i, j].item() <= 0:
+                    new_grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
+                    new_grid[CHANNEL_DENSITY, i, j] = 0.0
+        
         self.grid = new_grid
+    
+    
+    def _check_water_condensation_debug(self, step_num: int) -> None:
+        """
+        Fonction de diagnostic pour vérifier que l'eau se condense correctement.
+        
+        Règle : Si on a au moins 2 lignes COMPLÈTES d'eau en bas (toutes les cellules = eau),
+        la dernière ligne devrait avoir une densité de 1.0 (ou proche) après quelques steps.
+        """
+        # Trouver la dernière ligne qui contient de l'eau
+        last_water_line = -1
+        for i in range(self.grid_size - 1, -1, -1):
+            if (self.grid[CHANNEL_TYPE, i, :] == TYPE_WATER).any():
+                last_water_line = i
+                break
+        
+        if last_water_line == -1:
+            # Pas d'eau, rien à vérifier
+            return
+        
+        # Compter combien de lignes COMPLÈTES d'eau on a en partant du bas
+        complete_water_lines_count = 0
+        for i in range(self.grid_size - 1, -1, -1):
+            # Vérifier si TOUTES les cellules de cette ligne sont de l'eau
+            if (self.grid[CHANNEL_TYPE, i, :] == TYPE_WATER).all():
+                complete_water_lines_count += 1
+            else:
+                break
+        
+        # Si on a au moins 2 lignes COMPLÈTES d'eau, vérifier la dernière ligne
+        if complete_water_lines_count >= 2 and step_num > 5:
+            # Calculer la densité moyenne de la dernière ligne complète d'eau
+            bottom_line = self.grid_size - 1
+            densities = self.grid[CHANNEL_DENSITY, bottom_line, :]
+            avg_density = densities.mean().item()
+            min_density = densities.min().item()
+            max_density = densities.max().item()
+            
+            print(f"\n⚠️  DEBUG Step {step_num}: Lignes complètes d'eau = {complete_water_lines_count}")
+            print(f"    Densité de la ligne {bottom_line} (complète):")
+            print(f"    Moyenne: {avg_density:.4f}, Min: {min_density:.4f}, Max: {max_density:.4f}")
+            
+            # Si la densité moyenne est loin de 1.0, il y a un problème
+            if avg_density < 0.95:
+                print(f"    ❌ PROBLÈME: La ligne du bas devrait être à densité 1.0 !")
+                
+                # Afficher les densités de toutes les lignes complètes d'eau
+                print(f"\n    Détail des {complete_water_lines_count} lignes COMPLÈTES d'eau:")
+                for i in range(self.grid_size - 1, self.grid_size - complete_water_lines_count - 1, -1):
+                    densities_line = self.grid[CHANNEL_DENSITY, i, :]
+                    avg_line = densities_line.mean().item()
+                    print(f"    Ligne {i:2d}: densité moy={avg_line:.4f}")
     
     
     def step(self):
@@ -506,6 +622,9 @@ class FluidSimulation:
         
         for step in range(n_steps):
             self.step()
+            
+            # DEBUG: Vérifier la condensation de l'eau
+            self._check_water_condensation_debug(step + 1)
             
             # Enregistrer l'historique
             if step % record_every == 0:
