@@ -76,10 +76,14 @@ class FluidSimulation:
             line_density_avg = self.grid[CHANNEL_DENSITY, i, :].mean().item()
             # Max density on the line:
             line_density_max = self.grid[CHANNEL_DENSITY, i, :].max().item()
-            # Minumim density, but not the 0.0 ones:
-            non_zero_densities = self.grid[CHANNEL_DENSITY, i, :][self.grid[CHANNEL_DENSITY, i, :] > 0.0].min().item()
+            # Minimum density, but not the 0.0 ones:
+            non_zero_mask = self.grid[CHANNEL_DENSITY, i, :] > 0.0
+            if non_zero_mask.any():
+                non_zero_densities = self.grid[CHANNEL_DENSITY, i, :][non_zero_mask].min().item()
+            else:
+                non_zero_densities = 0.0
             
-            print(f"Ligne {i:2d}: {''.join(row)}  | Densité moy: {line_density_avg:.4f}  Max:{line_density_max:.4f}  Min:{non_zero_densities:.4f}")
+            print(f"Ligne {i:2d}: {''.join(row)}  | Densité moy: {line_density_avg:.4f}  Max:{line_density_max:.4f}  Min:{non_zero_densities:.10f}")
         
         # Afficher les stats
         nb_empty, nb_gas, nb_water = self._get_stats()
