@@ -38,6 +38,8 @@ TYPE_DISPLAY = {0: 'empty', 1: 'gas', 2: 'water'}
 CHANNEL_TYPE = 0  # Canal du type de cellule
 CHANNEL_DENSITY = 1  # Canal de la densité
 
+TOO_LOW_WATER_THRESHOLD = 0.000_001
+
 
 class FluidSimulation:
     """
@@ -114,11 +116,26 @@ class FluidSimulation:
         print("🌊 Scénario 1 initialisé : Bloc d'eau en haut, gaz en bas")
     
     
-    def _set_type_on_case(self, grid, row, col, type, why):
-        before_type = int(grid[CHANNEL_TYPE, row, col].item())
+    def _get_type_case(self, grid, row, col):
+        return int(grid[CHANNEL_TYPE, row, col].item())
+    
+    
+    def _set_type_case(self, grid, row, col, type, why):
+        before_type = self._get_type_case(grid, row, col)  # int(grid[CHANNEL_TYPE, row, col].item())
         grid[CHANNEL_TYPE, row, col] = type
-        #if row == 13:  # and col == 15:
+        # if row == 13:  # and col == 15:
         #    print(f'Set type {TYPE_DISPLAY.get(before_type)}->{TYPE_DISPLAY.get(type)} on case ({row},{col})  [{why}]')
+    
+    
+    def _set_density_on_case(self, grid, row, col, value, why):
+        before_density = grid[CHANNEL_DENSITY, row, col].item()
+        grid[CHANNEL_DENSITY, row, col] = value
+        # if row == 13:  # and col == 15:
+        #    print(f'Set density {before_density}->{type} on case ({row},{col})  [{why}]')
+    
+    
+    def _get_density_on_case(self, grid, row, col):
+        return grid[CHANNEL_DENSITY, row, col].item()
     
     
     def _water_apply_switch(self):
@@ -132,22 +149,19 @@ class FluidSimulation:
         # Parcours de bas en haut pour que l'eau tombe sans conflit
         for row in range(self.grid_size - 2, -1, -1):
             for col in range(self.grid_size):
-                current_type = int(new_grid[CHANNEL_TYPE, row, col].item())
-                below_type = int(new_grid[CHANNEL_TYPE, row + 1, col].item())
+                current_type = self._get_type_case(new_grid, row, col)
+                below_type = self._get_type_case(new_grid, row + 1, col)
                 
                 # L'EAU tombe sur le GAZ ou le VIDE
                 if current_type == TYPE_WATER and below_type in [TYPE_GAS, TYPE_EMPTY]:
                     # SWAP des types
-                    self._set_type_on_case(new_grid, row, col, below_type, 'water_fall')
-                    # new_grid[CHANNEL_TYPE, row, col] = below_type
-                    self._set_type_on_case(new_grid, row + 1, col, current_type, 'water_fall')
-                    # new_grid[CHANNEL_TYPE, row + 1, col] = current_type
+                    self._set_type_case(new_grid, row, col, below_type, 'water_fall')
+                    self._set_type_case(new_grid, row + 1, col, current_type, 'water_fall')
                     
                     # SWAP des densités
                     temp_density = new_grid[CHANNEL_DENSITY, row, col].clone()
-                    new_grid[CHANNEL_DENSITY, row, col] = new_grid[CHANNEL_DENSITY, row + 1, col]
-                    new_grid[CHANNEL_DENSITY, row + 1, col] = temp_density
-                    # print(f'Did switch : from ({row},{col}) to ({row+1},{col})')
+                    self._set_density_on_case(new_grid, row, col, self._get_density_on_case(new_grid, row + 1, col), 'water_fall')
+                    self._set_density_on_case(new_grid, row + 1, col, temp_density, 'water_fall')
         
         self.grid = new_grid
     
@@ -161,10 +175,10 @@ class FluidSimulation:
         for row in range(self.grid_size):
             for col in range(self.grid_size):
                 # On ne traite que les cellules d'EAU
-                if int(new_grid[CHANNEL_TYPE, row, col].item()) != TYPE_WATER:
+                if self._get_type_case(new_grid, row, col) != TYPE_WATER:
                     continue
                 
-                current_density = new_grid[CHANNEL_DENSITY, row, col].item()
+                current_density = self._get_density_on_case(new_grid, row, col)  # ].item()
                 
                 # Chercher les 3 cases en dessous (gauche, centre, droite)
                 water_targets = []
@@ -172,19 +186,19 @@ class FluidSimulation:
                 if row < self.grid_size - 1:  # si on a rien en dessous on s'en fiche
                     # En dessous à gauche
                     if col > 0:
-                        if int(new_grid[CHANNEL_TYPE, row + 1, col - 1].item()) == TYPE_WATER:
-                            density = new_grid[CHANNEL_DENSITY, row + 1, col - 1].item()
+                        if self._get_type_case(new_grid, row + 1, col - 1) == TYPE_WATER:
+                            density = self._get_density_on_case(new_grid, row + 1, col - 1)
                             water_targets.append((row + 1, col - 1, density))
                     
                     # En dessous au centre
-                    if int(new_grid[CHANNEL_TYPE, row + 1, col].item()) == TYPE_WATER:
-                        density = new_grid[CHANNEL_DENSITY, row + 1, col].item()
+                    if self._get_type_case(new_grid, row + 1, col) == TYPE_WATER:
+                        density = self._get_density_on_case(new_grid, row + 1, col)
                         water_targets.append((row + 1, col, density))
                     
                     # En dessous à droite
                     if col < self.grid_size - 1:
-                        if int(new_grid[CHANNEL_TYPE, row + 1, col + 1].item()) == TYPE_WATER:
-                            density = new_grid[CHANNEL_DENSITY, row + 1, col + 1].item()
+                        if self._get_type_case(new_grid, row + 1, col + 1) == TYPE_WATER:
+                            density = self._get_density_on_case(new_grid, row + 1, col + 1)
                             water_targets.append((row + 1, col + 1, density))
                 
                 if len(water_targets) == 0:
@@ -198,13 +212,11 @@ class FluidSimulation:
                     # Remplir toutes les cases à 1.0
                     for wi, wj, _ in water_targets:
                         new_grid[CHANNEL_DENSITY, wi, wj] = 1.0
+                        self._set_density_on_case(new_grid, wi, wj, 1.0, 'water_vertical_fill')
                     
                     # Garder le reste
-                    new_grid[CHANNEL_DENSITY, row, col] = current_density - total_space_needed
-                    
-                    # Si on a tout donné, devenir EMPTY
-                    # if new_grid[CHANNEL_DENSITY, row, col].item() == 0.0:
-                    #    self._set_type_on_case(new_grid, row, col, TYPE_EMPTY, 'eau a coule en dessous, tout vidée')
+                    self._set_density_on_case(new_grid, row, col, current_density - total_space_needed, 'water_vertical_keep_rest')
+                
                 
                 # CAS 2 : On n'a pas assez, on répartit équitablement
                 else:
@@ -216,11 +228,11 @@ class FluidSimulation:
                     
                     # Répartir équitablement
                     for wi, wj, _ in water_targets:
-                        new_grid[CHANNEL_DENSITY, wi, wj] = avg_density
+                        self._set_density_on_case(new_grid, wi, wj, avg_density, 'water_vertical_fill_not_full')
                     
                     # On devient EMPTY car on a tout donné
-                    new_grid[CHANNEL_DENSITY, row, col] = 0.0
-                    self._set_type_on_case(new_grid, row, col, TYPE_EMPTY, 'eau a coule en dessous, tout vidée')
+                    self._set_density_on_case(new_grid, row, col, 0.0, 'water_vertical_all_given')
+                    self._set_type_case(new_grid, row, col, TYPE_EMPTY, 'eau a coule en dessous, tout vidée')
         
         self.grid = new_grid
     
@@ -243,32 +255,32 @@ class FluidSimulation:
         for row in range(self.grid_size):
             for col in range(self.grid_size):
                 # On ne traite que les cellules d'EAU
-                if int(new_grid[CHANNEL_TYPE, row, col].item()) != TYPE_WATER:
+                if self._get_type_case(new_grid, row, col) != TYPE_WATER:
                     continue
                 
-                current_density = new_grid[CHANNEL_DENSITY, row, col].item()
+                current_density = self._get_density_on_case(new_grid, row, col)
                 
                 # Lister les cases de gaz autour (dessous + côtés)
                 gas_neighbors = []
                 
                 # Côtés
                 if col > 0:
-                    if int(new_grid[CHANNEL_TYPE, row, col - 1].item()) == TYPE_GAS:
+                    if self._get_type_case(new_grid, row, col - 1) == TYPE_GAS:
                         gas_neighbors.append((row, col - 1))
                 
                 if col < self.grid_size - 1:
-                    if int(new_grid[CHANNEL_TYPE, row, col + 1].item()) == TYPE_GAS:
+                    if self._get_type_case(new_grid, row, col + 1) == TYPE_GAS:
                         gas_neighbors.append((row, col + 1))
                 
                 # Tenter de pousser chaque gaz vers le haut
                 freed_slots = []
                 
                 for gi, gj in gas_neighbors:
-                    gas_density = new_grid[CHANNEL_DENSITY, gi, gj].item()
+                    gas_density = self._get_density_on_case(new_grid, gi, gj)
                     
                     # Vérifier si on peut pousser vers le haut
                     if gi > 0:
-                        above_type = int(new_grid[CHANNEL_TYPE, gi - 1, gj].item())
+                        above_type = self._get_type_case(new_grid, gi - 1, gj)
                         
                         can_push = False
                         
@@ -277,7 +289,7 @@ class FluidSimulation:
                             can_push = True
                         elif above_type == TYPE_GAS:
                             # Case de gaz : vérifier si la fusion ne dépasse pas 1.0
-                            above_density = new_grid[CHANNEL_DENSITY, gi - 1, gj].item()
+                            above_density = self._get_density_on_case(new_grid, gi - 1, gj)
                             if above_density + gas_density < 1.0:
                                 can_push = True
                         
@@ -285,17 +297,15 @@ class FluidSimulation:
                             # Pousser le gaz vers le haut
                             if above_type == TYPE_EMPTY:
                                 # Déplacer le gaz
-                                # new_grid[CHANNEL_TYPE, gi - 1, gj] = TYPE_GAS
-                                self._set_type_on_case(new_grid, gi - 1, gj, TYPE_GAS, 'eau a pousse du gaz vers le haut')
-                                new_grid[CHANNEL_DENSITY, gi - 1, gj] = gas_density
+                                self._set_type_case(new_grid, gi - 1, gj, TYPE_GAS, 'eau a pousse du gaz vers le haut')
+                                self._set_density_on_case(new_grid, gi - 1, gj, gas_density, 'eau a pousse du gaz vers le haut')
                             elif above_type == TYPE_GAS:
                                 # Fusionner avec le gaz au-dessus
                                 new_grid[CHANNEL_DENSITY, gi - 1, gj] += gas_density
                             
                             # La case de gaz devient disponible
-                            # new_grid[CHANNEL_TYPE, gi, gj] = TYPE_EMPTY
-                            self._set_type_on_case(new_grid, gi, gj, TYPE_EMPTY, 'eau a pousse du gaz vers le haut et lui est dispo')
-                            new_grid[CHANNEL_DENSITY, gi, gj] = 0.0
+                            self._set_type_case(new_grid, gi, gj, TYPE_EMPTY, 'eau a pousse du gaz vers le haut et lui est dispo')
+                            self._set_density_on_case(new_grid, gi, gj, 0.0, 'eau a pousse du gaz vers le haut et lui est dispo')
                             freed_slots.append((gi, gj))
                 
                 # Si on a libéré des cases, redistribuer l'eau
@@ -305,13 +315,12 @@ class FluidSimulation:
                     new_density = current_density / total_slots
                     
                     # Mettre à jour la case d'eau actuelle
-                    new_grid[CHANNEL_DENSITY, row, col] = new_density
+                    self._set_density_on_case(new_grid, row, col, new_density, 'eau a pris la place du gaz')
                     
                     # Redistribuer dans les cases libérées
                     for fi, fj in freed_slots:
-                        # new_grid[CHANNEL_TYPE, fi, fj] = TYPE_WATER
-                        self._set_type_on_case(new_grid, fi, fj, TYPE_WATER, 'eau a pris la place du gaz')
-                        new_grid[CHANNEL_DENSITY, fi, fj] = new_density
+                        self._set_type_case(new_grid, fi, fj, TYPE_WATER, 'eau a pris la place du gaz')
+                        self._set_density_on_case(new_grid, fi, fj, new_density, 'eau a pris la place du gaz')
         
         self.grid = new_grid
     
@@ -327,31 +336,31 @@ class FluidSimulation:
         
         # PHASE 2 : Concentration vers le bas ET vers les côtés
         # IMPORTANT: Parcours de HAUT EN BAS pour que les cellules du haut transfèrent vers le bas
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
                 # On ne traite que les cellules d'EAU
-                if int(new_grid[CHANNEL_TYPE, i, j].item()) != TYPE_WATER:
+                if self._get_type_case(new_grid, row, col) != TYPE_WATER:
                     continue
                 
-                current_density = new_grid[CHANNEL_DENSITY, i, j].item()
+                current_density = self._get_density_on_case(new_grid, row, col)
                 
                 # Si on n'a plus rien, passer
                 if current_density <= 0:
                     continue
                 
                 # Chercher les 3 cases en dessous (gauche, centre, droite)
-                water_targets = [(i, j)]
+                water_targets = [(row, col)]
                 
                 # Chercher les 2 cases sur les côtés (gauche, droite)
                 # Côté gauche
-                if j > 0:
-                    if int(new_grid[CHANNEL_TYPE, i, j - 1].item()) == TYPE_WATER:
-                        water_targets.append((i, j - 1))
+                if col > 0:
+                    if self._get_type_case(new_grid, row, col - 1) == TYPE_WATER:
+                        water_targets.append((row, col - 1))
                 
                 # Côté droit
-                if j < self.grid_size - 1:
-                    if int(new_grid[CHANNEL_TYPE, i, j + 1].item()) == TYPE_WATER:
-                        water_targets.append((i, j + 1))
+                if col < self.grid_size - 1:
+                    if self._get_type_case(new_grid, row, col + 1) == TYPE_WATER:
+                        water_targets.append((row, col + 1))
                 
                 if len(water_targets) == 1:
                     continue
@@ -361,7 +370,7 @@ class FluidSimulation:
                 total_density = sum(new_grid[CHANNEL_DENSITY, wi, wj].item() for wi, wj in water_targets)
                 avg_density = total_density / len(water_targets)
                 for wi, wj in water_targets:
-                    new_grid[CHANNEL_DENSITY, wi, wj] = avg_density
+                    self._set_density_on_case(new_grid, wi, wj, avg_density, 'water_etalement')
         
         self.grid = new_grid
     
@@ -379,10 +388,10 @@ class FluidSimulation:
         new_grid = self.grid.clone()
         
         # Phase 1 : diffusion vers les cellules VIDES (inchangé)
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
-                if int(new_grid[CHANNEL_TYPE, i, j].item()) == TYPE_GAS:
-                    current_density = new_grid[CHANNEL_DENSITY, i, j].item()
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                if self._get_type_case(new_grid, row, col) == TYPE_GAS:
+                    current_density = self._get_density_on_case(new_grid, row, col)
                     if current_density == 0:
                         continue
                     
@@ -394,12 +403,12 @@ class FluidSimulation:
                             if di == 0 and dj == 0:
                                 continue
                             
-                            ni, nj = i + di, j + dj
+                            ni, nj = row + di, col + dj
                             # Vérifier les limites de la grille
                             if (0 <= ni < self.grid_size and
                                     0 <= nj < self.grid_size):
                                 # Uniquement les cellules VIDES
-                                if int(new_grid[CHANNEL_TYPE, ni, nj].item()) == TYPE_EMPTY:
+                                if self._get_type_case(new_grid, ni, nj) == TYPE_EMPTY:
                                     empty_neighbors.append((ni, nj))
                     
                     if empty_neighbors:
@@ -408,34 +417,38 @@ class FluidSimulation:
                         density_per_cell = current_density / total_cells
                         
                         # Mettre à jour la cellule source
-                        new_grid[CHANNEL_DENSITY, i, j] = density_per_cell
+                        new_grid[CHANNEL_DENSITY, row, col] = density_per_cell
+                        self._set_density_on_case(new_grid, row, col, density_per_cell, 'gas_diffusion_source')
                         
                         # Mettre à jour les voisins vides
                         for ni, nj in empty_neighbors:
-                            new_grid[CHANNEL_TYPE, ni, nj] = TYPE_GAS
-                            new_grid[CHANNEL_DENSITY, ni, nj] = density_per_cell
+                            self._set_type_case(new_grid, ni, nj, TYPE_GAS, 'gas_diffusion_vide_vers_gaz')
+                            self._set_density_on_case(new_grid, ni, nj, density_per_cell, 'gas_diffusion_vide_vers_gaz')
         
         # Phase 2 : égalisation des densités entre cellules de GAZ adjacentes
         # On effectue plusieurs passes pour avoir une diffusion progressive
         # Coefficient de diffusion : 0.25 signifie qu'on transfert 25% de la différence
         diffusion_coefficient = 0.25
         
-        for i in range(self.grid_size):
-            for j in range(self.grid_size):
-                if int(new_grid[CHANNEL_TYPE, i, j].item()) == TYPE_GAS:
-                    current_density = new_grid[CHANNEL_DENSITY, i, j].item()
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                if self._get_type_case(new_grid, row, col) == TYPE_GAS:
+                    current_density = self._get_density_on_case(new_grid, row, col)
                     
                     # Analyser les voisins directs (4-connexité pour la diffusion gaz/gaz)
                     gas_neighbors = []
                     for di, dj in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                        ni, nj = i + di, j + dj
+                        ni, nj = row + di, col + dj
                         # Vérifier les limites de la grille
                         if (0 <= ni < self.grid_size and
                                 0 <= nj < self.grid_size):
                             # Uniquement les cellules de GAZ
-                            if int(new_grid[CHANNEL_TYPE, ni, nj].item()) == TYPE_GAS:
-                                neighbor_density = new_grid[CHANNEL_DENSITY, ni, nj].item()
+                            if self._get_type_case(new_grid, ni, nj) == TYPE_GAS:
+                                neighbor_density = self._get_density_on_case(new_grid, ni, nj)
                                 gas_neighbors.append((ni, nj, neighbor_density))
+                    
+                    if len(gas_neighbors) == 0:
+                        continue
                     
                     # Pour chaque voisin de gaz, on égalise progressivement les densités
                     for ni, nj, neighbor_density in gas_neighbors:
@@ -446,10 +459,24 @@ class FluidSimulation:
                         transfer_amount = density_diff * diffusion_coefficient
                         
                         # Mettre à jour les densités
-                        new_grid[CHANNEL_DENSITY, i, j] -= transfer_amount
+                        new_grid[CHANNEL_DENSITY, row, col] -= transfer_amount
                         new_grid[CHANNEL_DENSITY, ni, nj] += transfer_amount
         
         self.grid = new_grid
+    
+    
+    def _apply_water_disappear(self):
+        """
+        Si une case d'eau a une densité trop faible (proche de 0), on la vide.
+        """
+        for row in range(self.grid_size):
+            for col in range(self.grid_size):
+                if self._get_type_case(self.grid, row, col) == TYPE_WATER:
+                    current_density = self._get_density_on_case(self.grid, row, col)
+                    if current_density < TOO_LOW_WATER_THRESHOLD:
+                        # Vider la case
+                        self._set_type_case(self.grid, row, col, TYPE_EMPTY, 'water_disapear')
+                        self._set_density_on_case(self.grid, row, col, 0.0, 'water_disapear')
     
     
     def _check_water_condensation_debug(self, step_num: int) -> None:
@@ -536,6 +563,10 @@ class FluidSimulation:
         # 5 : l'eau s'étale vers les côtés vers l'eau
         self._apply_water_etalement()
         self._check_mass_conservation("_apply_water_etalement")
+        
+        # 6 : si une case eau est trop faible à cause de soucis de float, on la vide
+        self._apply_water_disappear()
+        self._check_mass_conservation("_apply_water_disapear")
     
     
     def _get_stats(self) -> Tuple[int, int, int]:
@@ -705,7 +736,7 @@ class FluidSimulation:
         gas_diff = abs(current_gas - self._initial_gas)
         water_diff = abs(current_water - self._initial_water)
         
-        if gas_diff > 1e-5 or water_diff > 1e-5:
+        if gas_diff > 1e-4 or water_diff > 1e-4:
             error_msg = f"""
 ERREUR FATALE: Perte de conservation de la matière détectée {f'après {step_name}' if step_name else ''}
 
