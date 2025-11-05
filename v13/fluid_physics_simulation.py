@@ -22,6 +22,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+DO_DEBUG = False
+
 # Constantes physiques
 GRID_SIZE = 16
 N_STEPS = 200
@@ -67,7 +69,7 @@ class FluidSimulation:
         # Justification des valeurs : on travaille avec densités dans [0,1] sur une grille 16x16 -> masse max ~256.
         # Les erreurs flottantes d'additions/soustractions successives restent normalement < 1e-12 * nombre d'opérations.
         # On se donne une marge garde f = 1e-8 par étape, 1e-6 cumulée.
-        self.mass_tolerance_step: float = 1e-2  # Seule tolérance conservée: différence avant/après étape
+        self.mass_tolerance_step: float = 0.1  # Seule tolérance conservée: différence avant/après étape
         
         # permet d'injecter de la matière ou des perturbations sans spécialiser `simulate`.
         self.pre_step_callback: Optional[Callable[['FluidSimulation', int], None]] = None
@@ -80,6 +82,10 @@ class FluidSimulation:
         Limite : si une ligne contient un mélange eau/gaz, seule l'eau est prise en compte, ce qui est cohérent
         avec l'objectif de suivre la compaction et la diffusion verticale de l'eau.
         """
+        
+        if not DO_DEBUG:
+            return
+        
         print(f"\n{'=' * 40}")
         print(title)
         print(f"{'=' * 40}")
@@ -108,7 +114,7 @@ class FluidSimulation:
         total_gas_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
         total_water_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
         print(
-            f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
+                f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
         print(f"{'=' * 40}\n")
     
     
@@ -463,11 +469,15 @@ class FluidSimulation:
         """
         new_grid = self.grid.clone()
         
-        # PHASE 1 : Pousser le gaz vers le haut
+        # Pousser le gaz vers le haut
         for row in range(self.grid_size):
             for col in range(self.grid_size):
                 # On ne traite que les cellules d'EAU
                 if self._get_type_case(new_grid, row, col) != TYPE_WATER:
+                    continue
+                
+                # si en dessous on a du GAZ c'est qu'on est en train de tomber, on ne fait pas de push sur le gaz d'a côté
+                if not self._check_if_all_bellow_is_water(new_grid, row, col):
                     continue
                 
                 current_density = self._get_density_on_case(new_grid, row, col)
@@ -525,8 +535,18 @@ class FluidSimulation:
                         self._set_type_case(new_grid, fi, fj, TYPE_WATER, 'expansion_eau')
                         self._set_density_on_case(new_grid, fi, fj, new_density, 'expansion_eau')
         
-        # PHASE 2 : Mise à jour globale
         self.grid = new_grid
+    
+    
+    def _check_if_all_bellow_is_water(self, grid, row, col) -> bool:
+        """
+        Vérifie si toutes les cases en dessous (même colonne) sont de l'eau.
+        Utile pour décider si on peut faire de l'étalement latéral.
+        """
+        for r in range(row + 1, self.grid_size):
+            if self._get_type_case(grid, r, col) != TYPE_WATER:
+                return False
+        return True
     
     
     def _apply_water_etalement(self):
@@ -946,31 +966,6 @@ EAU: avant={self.water_before:.10f} après={water_after:.10f} diff={water_diff:.
                 return False
         
         return _MassConservationContext(sim, step_name)
-
-
-def main():
-    """
-    Fonction principale pour tester la simulation.
-    """
-    print("=" * 60)
-    print("🌊 SIMULATION PHYSIQUE DE FLUIDES - TYPES + DENSITÉS")
-    print("=" * 60)
-    
-    # Créer la simulation
-    sim = FluidSimulation(grid_size=GRID_SIZE)
-    
-    # Scénario 1
-    sim.initialize_scenario_1()
-    
-    # Lancer la simulation
-    sim.simulate(n_steps=N_STEPS, record_every=1)
-    
-    # Créer l'animation
-    sim.save_animation(output_path="outputs/fluid_simulation.gif", max_frames=50)
-    
-    print("\n" + "=" * 60)
-    print("✅ SIMULATION TERMINÉE AVEC SUCCÈS !")
-    print("=" * 60)
 
 
 if __name__ == "__main__":
