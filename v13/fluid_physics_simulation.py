@@ -13,7 +13,7 @@ Approche :
 2. Densités continues pour permettre la diffusion
 3. Pas de confusion entre type et valeur
 """
-
+import random
 from pathlib import Path
 from typing import List, Tuple
 
@@ -204,6 +204,8 @@ class FluidSimulation:
                 if len(water_targets) == 0:
                     continue
                 
+                random.shuffle(water_targets)  # Pour éviter les biais de traitement
+                
                 # Calculer la somme de ce qu'il faut pour remplir les cases à 1.0
                 total_space_needed = sum(1.0 - target_density for _, _, target_density in water_targets)
                 
@@ -274,6 +276,8 @@ class FluidSimulation:
                 
                 # Tenter de pousser chaque gaz vers le haut
                 freed_slots = []
+                
+                random.shuffle(gas_neighbors)  # Pour éviter les biais de traitement
                 
                 for gi, gj in gas_neighbors:
                     gas_density = self._get_density_on_case(new_grid, gi, gj)
@@ -450,6 +454,8 @@ class FluidSimulation:
                     if len(gas_neighbors) == 0:
                         continue
                     
+                    random.shuffle(gas_neighbors)  # Pour éviter les biais de traitement
+                    
                     # Pour chaque voisin de gaz, on égalise progressivement les densités
                     for ni, nj, neighbor_density in gas_neighbors:
                         # Calculer la différence de densité
@@ -470,7 +476,7 @@ class FluidSimulation:
         Si une case d'eau a une densité trop faible (proche de 0), on la vide.
         """
         for row in range(self.grid_size):
-            for col in range(self.grid_size):
+            for col in self._get_random_col_lst():#in range(self.grid_size):
                 if self._get_type_case(self.grid, row, col) == TYPE_WATER:
                     current_density = self._get_density_on_case(self.grid, row, col)
                     if current_density < TOO_LOW_WATER_THRESHOLD:
