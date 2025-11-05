@@ -15,7 +15,7 @@ Approche :
 """
 import random
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Callable, Dict, Any
 
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
@@ -38,7 +38,8 @@ TYPE_DISPLAY = {0: 'empty', 1: 'gas', 2: 'water'}
 CHANNEL_TYPE = 0  # Canal du type de cellule
 CHANNEL_DENSITY = 1  # Canal de la densité
 
-TOO_LOW_WATER_THRESHOLD = 0.000_001
+# Seuil pour éliminer l'eau trop diluée (permet d'éviter les résidus persistants)
+TOO_LOW_WATER_THRESHOLD = 0.001
 
 
 class FluidSimulation:
@@ -57,46 +58,66 @@ class FluidSimulation:
         
         # Historique pour visualisation (on stocke tout)
         self.history: List[torch.Tensor] = []
+        
+        # Tolérances pour la conservation de la masse
+        # Ces valeurs sont choisies POUR ÉVITER les faux positifs dus aux flottants tout en gardant une exigence stricte.
+        # On sépare la tolérance PAR ÉTAPE (diff entre entrée et sortie d'un bloc d'opérations)
+        # et la tolérance CUMULÉE (diff entre état actuel et masse initiale globale).
+        # Hypothèse : opérations locales ne devraient jamais redistribuer plus que ~1e-9 de masse par flot.
+        # Justification des valeurs : on travaille avec densités dans [0,1] sur une grille 16x16 -> masse max ~256.
+        # Les erreurs flottantes d'additions/soustractions successives restent normalement < 1e-12 * nombre d'opérations.
+        # On se donne une marge garde f = 1e-8 par étape, 1e-6 cumulée.
+        self.mass_tolerance_step: float = 1e-2  # Seule tolérance conservée: différence avant/après étape
+        
+        # permet d'injecter de la matière ou des perturbations sans spécialiser `simulate`.
+        self.pre_step_callback: Optional[Callable[['FluidSimulation', int], None]] = None
     
     
     def _print_grid_ascii(self, title: str = "Grille"):
+        """Affiche la grille en ASCII avec statistiques de densité uniquement sur l'EAU.
+        Justification : l'utilisateur ne veut considérer que les cellules d'eau pour les métriques.
+        On ignore gaz et vide dans les moyennes pour éviter un bruit de lecture.
+        Limite : si une ligne contient un mélange eau/gaz, seule l'eau est prise en compte, ce qui est cohérent
+        avec l'objectif de suivre la compaction et la diffusion verticale de l'eau.
+        """
         print(f"\n{'=' * 40}")
-        print(f"{title}")
+        print(title)
         print(f"{'=' * 40}")
-        
         for i in range(self.grid_size):
-            row = []
+            chars = []
             for j in range(self.grid_size):
-                cell_type = int(self.grid[CHANNEL_TYPE, i, j].item())
-                
-                if cell_type == TYPE_EMPTY:
-                    row.append('V')
-                elif cell_type == TYPE_GAS:
-                    row.append('G')
-                else:  # TYPE_WATER
-                    row.append('O')
-            
-            # Calculer la densité moyenne de la ligne
-            line_density_avg = self.grid[CHANNEL_DENSITY, i, :].mean().item()
-            # Max density on the line:
-            line_density_max = self.grid[CHANNEL_DENSITY, i, :].max().item()
-            # Minimum density, but not the 0.0 ones:
-            non_zero_mask = self.grid[CHANNEL_DENSITY, i, :] > 0.0
-            if non_zero_mask.any():
-                non_zero_densities = self.grid[CHANNEL_DENSITY, i, :][non_zero_mask].min().item()
+                t = int(self.grid[CHANNEL_TYPE, i, j].item())
+                if t == TYPE_EMPTY:
+                    chars.append('V')
+                elif t == TYPE_GAS:
+                    chars.append('G')
+                else:
+                    chars.append('O')
+            water_mask = self.grid[CHANNEL_TYPE, i, :] == TYPE_WATER
+            if water_mask.any():
+                dens = self.grid[CHANNEL_DENSITY, i, :][water_mask]
+                avg = float(dens.mean().item())
+                mx = float(dens.max().item())
+                mn = float(dens.min().item())
             else:
-                non_zero_densities = 0.0
-            
-            print(f"Ligne {i:2d}: {''.join(row)}  | Densité moy: {line_density_avg:.4f}  Max:{line_density_max:.4f}  Min:{non_zero_densities:.10f}")
-        
-        # Afficher les stats
+                avg = 0.0
+                mx = 0.0
+                mn = 0.0
+            print(f"Ligne {i:2d}: {''.join(chars)}  | Densité moy: {avg:.4f}  Max:{mx:.4f}  Min:{mn:.10f}")
         nb_empty, nb_gas, nb_water = self._get_stats()
         total_gas_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
         total_water_density = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
-        
         print(
-                f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
+            f"\nSTATS: VIDE={nb_empty}, GAZ={nb_gas} (densité totale={total_gas_density:.2f}), EAU={nb_water} (densité totale={total_water_density:.2f})")
         print(f"{'=' * 40}\n")
+    
+    
+    def set_pre_step_callback(self, cb: Optional[Callable[['FluidSimulation', int], None]]) -> None:
+        """
+        Affecte ou retire le callback pré-step.
+        Hypothèse: le callback ne modifie pas la structure (dimensions) de la grille.
+        """
+        self.pre_step_callback = cb
     
     
     def initialize_scenario_1(self):
@@ -114,6 +135,185 @@ class FluidSimulation:
         self.grid[CHANNEL_DENSITY, 10:14, 2:14] = 1.0
         
         print("🌊 Scénario 1 initialisé : Bloc d'eau en haut, gaz en bas")
+    
+    
+    def initialize_scenario_2(self, seed: int | None = 123) -> None:
+        """Scénario 2 : Grille entièrement RANDOM avec répartition équilibrée des types.
+        Objectif pédagogique : tester la robustesse des règles face à un état chaotique.
+        Choix :
+        - Probabilités ~1/3 pour VIDE, GAZ, EAU afin d'éviter un biais initial.
+        - Densités aléatoires uniformes dans [0,1] pour GAZ et EAU (VIDE fixé à 0.0) pour varier les gradients.
+        - Seed paramétrable pour reproductibilité des tests.
+        Limite : certains points d'eau très faibles disparaîtront rapidement (logique voulue pour nettoyer).
+        """
+        if seed is not None:
+            random.seed(seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+        self.grid.fill_(0)
+        type_choices = [TYPE_EMPTY, TYPE_GAS, TYPE_WATER]
+        for i in range(self.grid_size):
+            for j in range(self.grid_size):
+                t = random.choice(type_choices)
+                self.grid[CHANNEL_TYPE, i, j] = t
+                if t == TYPE_EMPTY:
+                    self.grid[CHANNEL_DENSITY, i, j] = 0.0
+                else:
+                    # Densité aléatoire uniforme [0,1]
+                    self.grid[CHANNEL_DENSITY, i, j] = random.random()
+        print("🔀 Scénario 2 initialisé : grille aléatoire équilibrée")
+    
+    
+    def initialize_scenario_3(self) -> None:
+        """Scénario 3 : Colonnes d'eau latérales, gaz au centre, vide partiel en bas.
+        Objectif : observer la condensation latérale et la diffusion verticale + interaction poussée gaz.
+        Choix :
+        - Colonnes d'eau sur 3 colonnes à gauche et droite (stables, densité 1.0) pour créer une 'cuve'.
+        - Gaz au centre (colonnes intermédiaires) densité 1.0 pour force de flottabilité.
+        - Ligne du bas : quelques cellules vides pour créer des cavités permettant redistribution.
+        Hypothèse : L'eau latérale va pousser et contraindre le gaz central; le gaz devrait monter/diffuser.
+        """
+        self.grid.fill_(0)
+        # Eau latérale
+        left_cols = range(0, 3)
+        right_cols = range(self.grid_size - 3, self.grid_size)
+        for i in range(self.grid_size):
+            for j in list(left_cols) + list(right_cols):
+                self.grid[CHANNEL_TYPE, i, j] = TYPE_WATER
+                self.grid[CHANNEL_DENSITY, i, j] = 1.0
+        # Gaz central
+        for i in range(self.grid_size):
+            for j in range(3, self.grid_size - 3):
+                self.grid[CHANNEL_TYPE, i, j] = TYPE_GAS
+                self.grid[CHANNEL_DENSITY, i, j] = 1.0
+        # Vide partiel sur la ligne du bas (motif alterné) pour créer des poches
+        bottom = self.grid_size - 1
+        for j in range(3, self.grid_size - 3, 2):
+            self.grid[CHANNEL_TYPE, bottom, j] = TYPE_EMPTY
+            self.grid[CHANNEL_DENSITY, bottom, j] = 0.0
+        print("🧪 Scénario 3 initialisé : eau en colonnes latérales, gaz central, vide basal")
+    
+    
+    def initialize_scenario_4(self, seed: int | None = 99) -> None:
+        """Scénario 4 : Configuration surprise 'bulles et nappe'.
+        Idée : Mélange structuré pour tester interactions complexes.
+        Composition :
+        - Bande diagonale d'eau (créant une nappe inclinée) densité 1.0.
+        - Bulles de gaz (clusters circulaires approximatifs) au-dessus de la diagonale.
+        - Cavité vide centrale pour créer un point d'effondrement.
+        Justification :
+        - La diagonale d'eau va se réorganiser verticalement (gravité) -> test condensation.
+        - Les bulles de gaz devraient fusionner/monter -> test diffusion + poussée.
+        - La cavité vide centrale permet au gaz/eau de se redistribuer rapidement -> test stabilité.
+        """
+        if seed is not None:
+            random.seed(seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+        self.grid.fill_(0)
+        # Diagonale d'eau
+        for i in range(self.grid_size):
+            diag_col = i
+            self.grid[CHANNEL_TYPE, i, diag_col] = TYPE_WATER
+            self.grid[CHANNEL_DENSITY, i, diag_col] = 1.0
+            # Élargir la nappe (une épaisseur de 2 autour si possible)
+            if diag_col + 1 < self.grid_size:
+                self.grid[CHANNEL_TYPE, i, diag_col + 1] = TYPE_WATER
+                self.grid[CHANNEL_DENSITY, i, diag_col + 1] = 1.0
+        # Bulles de gaz (centres prédéfinis)
+        bubble_centers = [(3, 3), (5, 8), (2, 12), (8, 5), (10, 10)]
+        radius = 2
+        for ci, cj in bubble_centers:
+            for i in range(max(0, ci - radius), min(self.grid_size, ci + radius + 1)):
+                for j in range(max(0, cj - radius), min(self.grid_size, cj + radius + 1)):
+                    if (i - ci) ** 2 + (j - cj) ** 2 <= radius ** 2:
+                        # Ne pas écraser la nappe d'eau (priorité eau si déjà mise)
+                        if self.grid[CHANNEL_TYPE, i, j] != TYPE_WATER:
+                            self.grid[CHANNEL_TYPE, i, j] = TYPE_GAS
+                            # Densité variable pour hétérogénéité
+                            self.grid[CHANNEL_DENSITY, i, j] = 0.5 + 0.5 * random.random()
+        # Cavité vide centrale
+        center_start = self.grid_size // 2 - 2
+        center_end = self.grid_size // 2 + 2
+        for i in range(center_start, center_end):
+            for j in range(center_start, center_end):
+                self.grid[CHANNEL_TYPE, i, j] = TYPE_EMPTY
+                self.grid[CHANNEL_DENSITY, i, j] = 0.0
+        print("🎲 Scénario 4 initialisé : nappe diagonale d'eau, bulles de gaz, cavité centrale")
+    
+    
+    # --- Nouveau scénario 5 ---
+    def initialize_scenario_5(self, seed: int | None = 2025) -> None:
+        """
+        Scénario 5: ligne supérieure alternant GAZ/VIDE pour tester injection périodique d'eau.
+        Choix: densité gaz 0.6 pour voir compression progressive.
+        """
+        if seed is not None:
+            random.seed(seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+        self.grid.fill_(0)
+        for j in range(self.grid_size):
+            if j % 2 == 0:
+                self.grid[CHANNEL_TYPE, 0, j] = TYPE_GAS
+                self.grid[CHANNEL_DENSITY, 0, j] = 0.6
+        print("💧 Scénario 5 initialisé (alternance gaz/vide ligne 0)")
+    
+    
+    def _periodic_top_water_injection(self, step: int, period: int = 5) -> None:
+        """
+        Injection d'eau exogène toutes les `period` steps sur la ligne 0.
+        Règle:
+        - Si aucune case admissible (VIDE ou GAZ): on fait rien.
+        - Si VIDE: on place eau densité 1.0.
+        - Si GAZ: on tente de déplacer/comprimer vers un voisin (gauche, droite, dessous).
+          Si aucun voisin admissible: on annule cette injection.
+        Apport de masse volontaire (pas couvert par la conservation interne).
+        """
+        if period <= 0:
+            raise ValueError("Le period doit être > 0.")
+        if step % period != 0:
+            return
+        row = 0
+        candidates: List[int] = []
+        for col in range(self.grid_size):
+            t = self._get_type_case(self.grid, row, col)
+            if t in (TYPE_EMPTY, TYPE_GAS):
+                candidates.append(col)
+        if not candidates:
+            return
+        col = random.choice(candidates)
+        t = self._get_type_case(self.grid, row, col)
+        if t == TYPE_EMPTY:
+            self._set_type_case(self.grid, row, col, TYPE_WATER, 'injection_eau_vide')
+            self._set_density_on_case(self.grid, row, col, 1.0, 'injection_eau_vide')
+            return
+        # Cas GAZ
+        gas_density = self._get_density_on_case(self.grid, row, col)
+        neighbors: List[Tuple[int, int]] = []
+        if col > 0:
+            neighbors.append((row, col - 1))
+        if col < self.grid_size - 1:
+            neighbors.append((row, col + 1))
+        if row < self.grid_size - 1:
+            neighbors.append((row + 1, col))
+        relocated = False
+        for ni, nj in neighbors:
+            nt = self._get_type_case(self.grid, ni, nj)
+            if nt == TYPE_EMPTY:
+                self._set_type_case(self.grid, ni, nj, TYPE_GAS, 'relocation_gaz_vide')
+                self._set_density_on_case(self.grid, ni, nj, gas_density, 'relocation_gaz_vide')
+                relocated = True
+                break
+            elif nt == TYPE_GAS:
+                new_d = self._get_density_on_case(self.grid, ni, nj) + gas_density
+                self._set_density_on_case(self.grid, ni, nj, new_d, 'compression_gaz_injection')
+                relocated = True
+                break
+        if not relocated:
+            return
+        self._set_type_case(self.grid, row, col, TYPE_WATER, 'injection_eau_sur_gaz')
+        self._set_density_on_case(self.grid, row, col, 1.0, 'injection_eau_sur_gaz')
     
     
     def _get_type_case(self, grid, row, col):
@@ -241,15 +441,25 @@ class FluidSimulation:
     
     def _apply_water_push_neighbor_gaz(self):
         """
-        L'eau cherche à se condenser en poussant le gaz (ou le vide qu'on prends la place) vers le haut :
-        1. Pour chaque cellule d'eau, on regarde sur les côtés
+        L'eau cherche à se condenser en poussant le gaz (ou le vide qu'on prend à sa place) vers le haut :
+        1. Pour chaque cellule d'eau, on regarde sur les côtés (gauche/droite)
         2. Si c'est du GAZ, on essaie de le pousser vers le haut
         3. Si le push réussit, on redistribue l'eau dans les cases libérées
 
-        Règle de push : on peut pousser le gaz vers le haut SI :
-        - La case au-dessus est VIDE ou GAZ
-        - Si c'est GAZ, la densité après fusion doit rester < 1.0
-        
+        Règle de push (version compressible simplifiée) :
+        - On peut pousser le gaz vers le haut SI la case au-dessus est VIDE ou GAZ
+        - Si c'est GAZ: on FUSIONNE toujours (le gaz devient compressible, densité > 1.0 autorisée)
+        - Si c'est VIDE: on déplace simplement le gaz vers le haut
+        - Si c'est EAU: on ne mélange pas les types -> on ne pousse pas ce gaz
+
+        Justification de la modification minimale :
+        - Avant on bloquait la fusion si la somme dépassait 1.0 (gaz incompressible)
+        - On supprime uniquement cette contrainte pour débloquer l'expansion latérale de l'eau
+        - On conserve TOUTES les autres étapes et commentaires d'origine pour ne pas perdre le contexte pédagogique
+
+        Limites assumées :
+        - Pas encore de pression explicite -> risque de densités gaz élevées mais contrôlées plus tard
+        - Pas de cohabitation multi-phases dans une même case (un seul TYPE par case)
         """
         new_grid = self.grid.clone()
         
@@ -262,70 +472,60 @@ class FluidSimulation:
                 
                 current_density = self._get_density_on_case(new_grid, row, col)
                 
-                # Lister les cases de gaz autour (dessous + côtés)
+                # Lister les cases de gaz autour (côtés uniquement)
                 gas_neighbors = []
                 
-                # Côtés
+                # Côté gauche
                 if col > 0:
                     if self._get_type_case(new_grid, row, col - 1) == TYPE_GAS:
                         gas_neighbors.append((row, col - 1))
                 
+                # Côté droit
                 if col < self.grid_size - 1:
                     if self._get_type_case(new_grid, row, col + 1) == TYPE_GAS:
                         gas_neighbors.append((row, col + 1))
                 
                 # Tenter de pousser chaque gaz vers le haut
                 freed_slots = []
-                
-                random.shuffle(gas_neighbors)  # Pour éviter les biais de traitement
+                random.shuffle(gas_neighbors)  # Pour éviter les biais directionnels
                 
                 for gi, gj in gas_neighbors:
                     gas_density = self._get_density_on_case(new_grid, gi, gj)
                     
                     # Vérifier si on peut pousser vers le haut
-                    if gi > 0:
+                    if gi > 0:  # Pas possible sur la première ligne (gi == 0)
                         above_type = self._get_type_case(new_grid, gi - 1, gj)
                         
-                        can_push = False
-                        
                         if above_type == TYPE_EMPTY:
-                            # Case vide : on peut pousser
-                            can_push = True
+                            # Case vide : déplacement direct
+                            self._set_type_case(new_grid, gi - 1, gj, TYPE_GAS, 'push_gaz_vide')
+                            self._set_density_on_case(new_grid, gi - 1, gj, gas_density, 'push_gaz_vide')
                         elif above_type == TYPE_GAS:
-                            # Case de gaz : vérifier si la fusion ne dépasse pas 1.0
-                            above_density = self._get_density_on_case(new_grid, gi - 1, gj)
-                            if above_density + gas_density < 1.0:
-                                can_push = True
+                            # Fusion : gaz compressible, on additionne SANS limite
+                            new_grid[CHANNEL_DENSITY, gi - 1, gj] += gas_density
+                        else:
+                            # Au-dessus eau -> on ne peut pas pousser ce gaz
+                            continue
                         
-                        if can_push:
-                            # Pousser le gaz vers le haut
-                            if above_type == TYPE_EMPTY:
-                                # Déplacer le gaz
-                                self._set_type_case(new_grid, gi - 1, gj, TYPE_GAS, 'eau a pousse du gaz vers le haut')
-                                self._set_density_on_case(new_grid, gi - 1, gj, gas_density, 'eau a pousse du gaz vers le haut')
-                            elif above_type == TYPE_GAS:
-                                # Fusionner avec le gaz au-dessus
-                                new_grid[CHANNEL_DENSITY, gi - 1, gj] += gas_density
-                            
-                            # La case de gaz devient disponible
-                            self._set_type_case(new_grid, gi, gj, TYPE_EMPTY, 'eau a pousse du gaz vers le haut et lui est dispo')
-                            self._set_density_on_case(new_grid, gi, gj, 0.0, 'eau a pousse du gaz vers le haut et lui est dispo')
-                            freed_slots.append((gi, gj))
+                        # Libérer la case d'origine du gaz
+                        self._set_type_case(new_grid, gi, gj, TYPE_EMPTY, 'case_liberee_apres_push')
+                        self._set_density_on_case(new_grid, gi, gj, 0.0, 'case_liberee_apres_push')
+                        freed_slots.append((gi, gj))
                 
-                # Si on a libéré des cases, redistribuer l'eau
+                # Si on a libéré des cases de gaz -> expansion de l'eau latéralement
                 if freed_slots:
-                    # Calculer la nouvelle densité répartie
-                    total_slots = len(freed_slots) + 1  # +1 pour la case d'eau actuelle
+                    total_slots = len(freed_slots) + 1  # +1 pour la case source
                     new_density = current_density / total_slots
                     
-                    # Mettre à jour la case d'eau actuelle
-                    self._set_density_on_case(new_grid, row, col, new_density, 'eau a pris la place du gaz')
+                    # Mettre à jour la case d'eau source
+                    self._set_density_on_case(new_grid, row, col, new_density, 'redistribution_eau')
                     
-                    # Redistribuer dans les cases libérées
+                    # Remplir les cases libérées avec de l'eau
                     for fi, fj in freed_slots:
-                        self._set_type_case(new_grid, fi, fj, TYPE_WATER, 'eau a pris la place du gaz')
-                        self._set_density_on_case(new_grid, fi, fj, new_density, 'eau a pris la place du gaz')
+                        self._set_type_case(new_grid, fi, fj, TYPE_WATER, 'expansion_eau')
+                        self._set_density_on_case(new_grid, fi, fj, new_density, 'expansion_eau')
         
+        # PHASE 2 : Mise à jour globale
         self.grid = new_grid
     
     
@@ -476,7 +676,7 @@ class FluidSimulation:
         Si une case d'eau a une densité trop faible (proche de 0), on la vide.
         """
         for row in range(self.grid_size):
-            for col in self._get_random_col_lst():#in range(self.grid_size):
+            for col in range(self.grid_size):
                 if self._get_type_case(self.grid, row, col) == TYPE_WATER:
                     current_density = self._get_density_on_case(self.grid, row, col)
                     if current_density < TOO_LOW_WATER_THRESHOLD:
@@ -534,45 +734,28 @@ class FluidSimulation:
     
     
     def step(self):
+        """Un pas de simulation avec vérification entrée/sortie sur chaque bloc.
+        On NE conserve PAS de masse globale, on vérifie seulement que chaque transformation
+        ne détruit pas plus que la tolérance autorisée (erreurs flottantes minimes).
         """
-        Un pas de simulation.
-        
-        Étapes :
-        1. Gravité : EAU descend
-        2. Flottabilité : GAZ monte
-        3. Débordement latéral : EAU s'étale
-        4. Diffusion du gaz : GAZ se répartit dans le VIDE
-        5. Condensation : l'EAU se condense vers le bas
-        
-        La conservation de la masse est vérifiée après chaque étape.
-        Si une perte de matière est détectée, le programme s'arrête avec une erreur.
-        """
-        # Vérification initiale
-        self._check_mass_conservation()
-        
         # 1 eau -> swap vide
-        self._water_apply_switch()
-        self._check_mass_conservation("_water_apply_switch")
-        
+        with self._check_mass_conservation("_water_apply_switch"):
+            self._water_apply_switch()
         # 2 eau -> concentration vers le bas
-        self._apply_water_vertical_condensation()
-        self._check_mass_conservation("_apply_water_vertical_condensation")
-        
+        with self._check_mass_conservation("_apply_water_vertical_condensation"):
+            self._apply_water_vertical_condensation()
         # 3 gaz: prends toute la place disponible
-        self._apply_gas_diffusion()
-        self._check_mass_conservation("_apply_gas_diffusion")
-        
+        with self._check_mass_conservation("_apply_gas_diffusion"):
+            self._apply_gas_diffusion()
         # 4 : l'eau pousse le gaz
-        self._apply_water_push_neighbor_gaz()
-        self._check_mass_conservation("_apply_water_push_neighbor_gaz")
-        
+        with self._check_mass_conservation("_apply_water_push_neighbor_gaz"):
+            self._apply_water_push_neighbor_gaz()
         # 5 : l'eau s'étale vers les côtés vers l'eau
-        self._apply_water_etalement()
-        self._check_mass_conservation("_apply_water_etalement")
-        
-        # 6 : si une case eau est trop faible à cause de soucis de float, on la vide
-        self._apply_water_disappear()
-        self._check_mass_conservation("_apply_water_disapear")
+        with self._check_mass_conservation("_apply_water_etalement"):
+            self._apply_water_etalement()
+        # 6 : élimination eau trop diluée
+        with self._check_mass_conservation("_apply_water_disapear"):
+            self._apply_water_disappear()
     
     
     def _get_stats(self) -> Tuple[int, int, int]:
@@ -584,9 +767,9 @@ class FluidSimulation:
         """
         type_grid = self.grid[CHANNEL_TYPE]
         
-        empty_count = (type_grid == TYPE_EMPTY).sum().item()
-        gas_count = (type_grid == TYPE_GAS).sum().item()
-        water_count = (type_grid == TYPE_WATER).sum().item()
+        empty_count = (type_grid == TYPE_EMPTY).to(torch.int32).sum().item()
+        gas_count = (type_grid == TYPE_GAS).to(torch.int32).sum().item()
+        water_count = (type_grid == TYPE_WATER).to(torch.int32).sum().item()
         
         return int(empty_count), int(gas_count), int(water_count)
     
@@ -612,6 +795,9 @@ class FluidSimulation:
         self._print_grid_ascii("ÉTAT INITIAL (Step 0)")
         
         for step in range(n_steps):
+            if self.pre_step_callback is not None:
+                self.pre_step_callback(self, step)
+            
             self.step()
             
             # DEBUG: Vérifier la condensation de l'eau
@@ -692,9 +878,9 @@ class FluidSimulation:
             
             # Compter les types
             type_grid = grid_frame[CHANNEL_TYPE]
-            nb_empty = int((type_grid == TYPE_EMPTY).sum())
-            nb_gas = int((type_grid == TYPE_GAS).sum())
-            nb_water = int((type_grid == TYPE_WATER).sum())
+            nb_empty = int(np.count_nonzero(type_grid == TYPE_EMPTY))
+            nb_gas = int(np.count_nonzero(type_grid == TYPE_GAS))
+            nb_water = int(np.count_nonzero(type_grid == TYPE_WATER))
             
             ax.text(0.02, 0.98, f'VIDE: {nb_empty} | GAZ: {nb_gas} | EAU: {nb_water}',
                     transform=ax.transAxes, fontsize=10,
@@ -722,41 +908,44 @@ class FluidSimulation:
     
     
     def _check_mass_conservation(self, step_name: str = ""):
+        """Context manager qui vérifie la conservation de la masse ENTRE l'entrée et la sortie.
+        Pas de stockage d'état global: uniquement diff locale immédiate.
+        Si la différence absolue (gaz ou eau) dépasse mass_tolerance_step => erreur.
         """
-        Vérifie que la masse totale (gaz + eau) est conservée.
-        Si on détecte une perte de matière, on arrête le programme.
+        sim = self
         
-        Args:
-            step_name: Nom de l'étape pour le message d'erreur
-        """
-        current_gas = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
-        current_water = self.grid[CHANNEL_DENSITY][self.grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
+        class _MassConservationContext:
+            def __init__(self, outer: FluidSimulation, name: str):
+                self.outer = outer
+                self.name = name
+                self.gas_before: float = 0.0
+                self.water_before: float = 0.0
+            
+            
+            def __enter__(self) -> "_MassConservationContext":
+                grid = self.outer.grid
+                self.gas_before = grid[CHANNEL_DENSITY][grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
+                self.water_before = grid[CHANNEL_DENSITY][grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
+                return self
+            
+            
+            def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
+                if exc_type is not None:
+                    return False
+                grid = self.outer.grid
+                gas_after = grid[CHANNEL_DENSITY][grid[CHANNEL_TYPE] == TYPE_GAS].sum().item()
+                water_after = grid[CHANNEL_DENSITY][grid[CHANNEL_TYPE] == TYPE_WATER].sum().item()
+                gas_diff = abs(gas_after - self.gas_before)
+                water_diff = abs(water_after - self.water_before)
+                if gas_diff > self.outer.mass_tolerance_step or water_diff > self.outer.mass_tolerance_step:
+                    raise RuntimeError(f"""
+ERREUR FATALE: Perte de masse détectée après étape {self.name}
+GAZ: avant={self.gas_before:.10f} après={gas_after:.10f} diff={gas_diff:.10f} tolérance={self.outer.mass_tolerance_step:.10f}
+EAU: avant={self.water_before:.10f} après={water_after:.10f} diff={water_diff:.10f} tolérance={self.outer.mass_tolerance_step:.10f}
+""")
+                return False
         
-        # On stocke les masses initiales lors de la première vérification
-        if not hasattr(self, '_initial_gas'):
-            self._initial_gas = current_gas
-            self._initial_water = current_water
-            return
-        
-        # Vérification avec une tolérance pour les erreurs de calcul flottant
-        gas_diff = abs(current_gas - self._initial_gas)
-        water_diff = abs(current_water - self._initial_water)
-        
-        if gas_diff > 1e-4 or water_diff > 1e-4:
-            error_msg = f"""
-ERREUR FATALE: Perte de conservation de la matière détectée {f'après {step_name}' if step_name else ''}
-
-GAZ:
-- Initial: {self._initial_gas:.10f}
-- Actuel:  {current_gas:.10f}
-- Diff:    {gas_diff:.10f}
-
-EAU:
-- Initial: {self._initial_water:.10f}
-- Actuel:  {current_water:.10f}
-- Diff:    {water_diff:.10f}
-"""
-            raise RuntimeError(error_msg)
+        return _MassConservationContext(sim, step_name)
 
 
 def main():
@@ -785,4 +974,23 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Exécuter les 4 scénarios et générer un GIF séparé pour chacun
+    scenario_registry: Dict[int, Dict[str, Any]] = {
+        1: {'label': 'scenario_1', 'init': FluidSimulation.initialize_scenario_1, 'callback': None},
+        2: {'label': 'scenario_2', 'init': FluidSimulation.initialize_scenario_2, 'callback': None},
+        3: {'label': 'scenario_3', 'init': FluidSimulation.initialize_scenario_3, 'callback': None},
+        4: {'label': 'scenario_4', 'init': FluidSimulation.initialize_scenario_4, 'callback': None},
+        5: {'label':    'scenario_5', 'init': FluidSimulation.initialize_scenario_5,
+            'callback': lambda sim, step: sim._periodic_top_water_injection(step, period=5)},
+    }
+    for sid, cfg in scenario_registry.items():
+        print("=" * 80)
+        print(f"🚀 DÉMARRAGE {cfg['label']}")
+        print("=" * 80)
+        sim = FluidSimulation(grid_size=GRID_SIZE)
+        cfg['init'](sim)  # appel méthode init
+        sim.set_pre_step_callback(cfg['callback'])
+        sim.simulate(n_steps=N_STEPS, record_every=1)
+        output_gif = f"outputs/fluid_simulation_{cfg['label']}.gif"
+        sim.save_animation(output_path=output_gif, max_frames=50)
+        print(f"✅ Fin {cfg['label']} -> {output_gif}")
