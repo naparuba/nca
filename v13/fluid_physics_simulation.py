@@ -170,34 +170,65 @@ class FluidSimulation:
         print("🔀 Scénario 2 initialisé : grille aléatoire équilibrée")
     
     
-    def initialize_scenario_3(self) -> None:
-        """Scénario 3 : Colonnes d'eau latérales, gaz au centre, vide partiel en bas.
+    def initialize_scenario_3(self, seed: int | None = 789) -> None:
+        """Scénario 3 : Colonnes d'eau latérales, gaz au centre, vide partiel en bas avec variabilité.
+        
         Objectif : observer la condensation latérale et la diffusion verticale + interaction poussée gaz.
+        
         Choix :
-        - Colonnes d'eau sur 3 colonnes à gauche et droite (stables, densité 1.0) pour créer une 'cuve'.
-        - Gaz au centre (colonnes intermédiaires) densité 1.0 pour force de flottabilité.
-        - Ligne du bas : quelques cellules vides pour créer des cavités permettant redistribution.
+        - Largeur des colonnes d'eau variable (2 à 4 colonnes) pour tester différentes pressions latérales
+        - Densité de l'eau variable pour créer des gradients de pression
+        - Densité du gaz central variable pour varier la force de flottabilité
+        - Motif de vide en bas randomisé pour créer des cavités imprévisibles
+        - Seed paramétrable pour reproductibilité
+        
         Hypothèse : L'eau latérale va pousser et contraindre le gaz central; le gaz devrait monter/diffuser.
+        Les variations de densité créeront des flux non uniformes intéressants.
         """
+        if seed is not None:
+            random.seed(seed)
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+        
         self.grid.fill_(0)
-        # Eau latérale
-        left_cols = range(0, 3)
-        right_cols = range(self.grid_size - 3, self.grid_size)
+        
+        # Largeur variable des colonnes d'eau (entre 2 et 4)
+        left_width = random.randint(2, 4)
+        right_width = random.randint(2, 4)
+        
+        left_cols = range(0, left_width)
+        right_cols = range(self.grid_size - right_width, self.grid_size)
+        
+        # Eau latérale avec densité variable pour créer des gradients
         for i in range(self.grid_size):
             for j in list(left_cols) + list(right_cols):
                 self.grid[CHANNEL_TYPE, i, j] = TYPE_WATER
-                self.grid[CHANNEL_DENSITY, i, j] = 1.0
-        # Gaz central
+                # Densité décroissante vers le haut (simule une colonne d'eau plus compacte en bas)
+                # Formule : densité diminue de ~20% du bas vers le haut
+                height_factor = 1.0 - (i / self.grid_size) * 0.2
+                base_density = 0.85 + random.random() * 0.15
+                self.grid[CHANNEL_DENSITY, i, j] = min(1.0, base_density * height_factor)
+        
+        # Gaz central avec densité variable selon la hauteur
         for i in range(self.grid_size):
-            for j in range(3, self.grid_size - 3):
+            for j in range(left_width, self.grid_size - right_width):
                 self.grid[CHANNEL_TYPE, i, j] = TYPE_GAS
-                self.grid[CHANNEL_DENSITY, i, j] = 1.0
-        # Vide partiel sur la ligne du bas (motif alterné) pour créer des poches
+                # Densité du gaz plus faible en haut (le gaz monte naturellement)
+                # Variation aléatoire entre 0.6 et 1.0, avec gradient vertical
+                height_factor = 1.0 - (i / self.grid_size) * 0.3
+                base_density = 0.6 + random.random() * 0.4
+                self.grid[CHANNEL_DENSITY, i, j] = base_density * height_factor
+        
+        # Vide partiel sur la ligne du bas avec motif randomisé
+        # Au lieu d'un motif alterné fixe, on crée un motif aléatoire
         bottom = self.grid_size - 1
-        for j in range(3, self.grid_size - 3, 2):
-            self.grid[CHANNEL_TYPE, bottom, j] = TYPE_EMPTY
-            self.grid[CHANNEL_DENSITY, bottom, j] = 0.0
-        print("🧪 Scénario 3 initialisé : eau en colonnes latérales, gaz central, vide basal")
+        # Probabilité de 40% qu'une cellule centrale devienne vide
+        for j in range(left_width, self.grid_size - right_width):
+            if random.random() < 0.4:
+                self.grid[CHANNEL_TYPE, bottom, j] = TYPE_EMPTY
+                self.grid[CHANNEL_DENSITY, bottom, j] = 0.0
+        
+        print(f"🧪 Scénario 3 initialisé : eau en colonnes[{left_width},{right_width}], gaz central variable, vide basal aléatoire (seed={seed})")
     
     
     def initialize_scenario_4(self, seed: int | None = 99) -> None:
@@ -324,24 +355,143 @@ class FluidSimulation:
     
     def _get_type_case(self, grid, row, col):
         return int(grid[CHANNEL_TYPE, row, col].item())
-    
-    
+
+
     def _set_type_case(self, grid, row, col, type, why):
         before_type = self._get_type_case(grid, row, col)  # int(grid[CHANNEL_TYPE, row, col].item())
         grid[CHANNEL_TYPE, row, col] = type
         # if row == 13:  # and col == 15:
         #    print(f'Set type {TYPE_DISPLAY.get(before_type)}->{TYPE_DISPLAY.get(type)} on case ({row},{col})  [{why}]')
-    
-    
+
+
     def _set_density_on_case(self, grid, row, col, value, why):
         before_density = grid[CHANNEL_DENSITY, row, col].item()
         grid[CHANNEL_DENSITY, row, col] = value
         # if row == 13:  # and col == 15:
         #    print(f'Set density {before_density}->{type} on case ({row},{col})  [{why}]')
-    
-    
+
+
     def _get_density_on_case(self, grid, row, col):
         return grid[CHANNEL_DENSITY, row, col].item()
+    
+    
+    def _random_gas_bubble_injection(self, step: int, period: int = 15, bubble_size: int = 2) -> None:
+        """
+        Injection aléatoire de bulles de gaz dans la partie basse de la grille.
+
+        Objectif : Créer des perturbations ascendantes pour observer la dynamique de flottabilité.
+
+        Choix :
+        - Injection périodique (tous les `period` steps) pour créer un flux régulier
+        - Position aléatoire dans le tiers inférieur pour varier les trajectoires
+        - Taille de bulle paramétrable (rayon en cellules)
+        - Densité de gaz variable (0.7-1.0) pour diversifier les comportements
+
+        Hypothèse : Les bulles vont monter et interagir avec l'eau existante, créant des courants.
+        """
+        if period <= 0:
+            raise ValueError("Le period doit être > 0.")
+        if step % period != 0:
+            return
+        
+        # Position aléatoire dans le tiers inférieur de la grille
+        center_row = random.randint(self.grid_size * 2 // 3, self.grid_size - bubble_size - 1)
+        center_col = random.randint(bubble_size, self.grid_size - bubble_size - 1)
+        
+        # Densité variable du gaz injecté
+        gas_density = 0.7 + random.random() * 0.3
+        
+        # Créer une bulle circulaire
+        for i in range(max(0, center_row - bubble_size), min(self.grid_size, center_row + bubble_size + 1)):
+            for j in range(max(0, center_col - bubble_size), min(self.grid_size, center_col + bubble_size + 1)):
+                # Distance euclidienne pour forme circulaire
+                if (i - center_row) ** 2 + (j - center_col) ** 2 <= bubble_size ** 2:
+                    current_type = self._get_type_case(self.grid, i, j)
+                    # On injecte seulement dans le vide ou on remplace l'eau (effet de perturbation)
+                    if current_type in (TYPE_EMPTY, TYPE_WATER):
+                        self._set_type_case(self.grid, i, j, TYPE_GAS, 'injection_bulle_gaz')
+                        self._set_density_on_case(self.grid, i, j, gas_density, 'injection_bulle_gaz')
+    
+    def _periodic_lateral_water_spray(self, step: int, period: int = 10, intensity: float = 0.8) -> None:
+        """
+        Injection d'eau depuis les côtés latéraux de la grille (gauche ou droite alternativement).
+        
+        Objectif : Simuler une pression latérale créant des flux horizontaux dans la simulation.
+        
+        Choix :
+        - Alternance gauche/droite pour créer des mouvements oscillatoires
+        - Hauteur d'injection aléatoire (moitié supérieure) pour varier les effets
+        - Largeur de spray variable (2-4 cellules) pour des jets de taille différente
+        - Intensité paramétrable pour contrôler la force du jet
+        
+        Limite : Apport de masse exogène, non conservatif (comme l'injection du haut).
+        """
+        if period <= 0:
+            raise ValueError("Le period doit être > 0.")
+        if step % period != 0:
+            return
+        
+        # Alterner entre gauche (step pair) et droite (step impair)
+        spray_from_left = (step // period) % 2 == 0
+        col = 0 if spray_from_left else self.grid_size - 1
+        
+        # Position verticale aléatoire dans la moitié supérieure
+        spray_center_row = random.randint(2, self.grid_size // 2)
+        spray_height = random.randint(2, 4)
+        
+        # Injecter de l'eau sur plusieurs lignes
+        for row in range(max(0, spray_center_row - spray_height // 2),
+                         min(self.grid_size, spray_center_row + spray_height // 2 + 1)):
+            current_type = self._get_type_case(self.grid, row, col)
+            if current_type in (TYPE_EMPTY, TYPE_GAS):
+                self._set_type_case(self.grid, row, col, TYPE_WATER, 'spray_lateral_eau')
+                self._set_density_on_case(self.grid, row, col, intensity, 'spray_lateral_eau')
+    
+    
+    def _create_random_void_pockets(self, step: int, period: int = 25, pocket_size: int = 2) -> None:
+        """
+        Création aléatoire de poches de vide dans la grille.
+        
+        Objectif : Simuler des effondrements ou cavités qui perturbent l'équilibre du système.
+        
+        Choix :
+        - Création périodique mais espacée pour éviter de déstabiliser complètement
+        - Position totalement aléatoire pour imprévisibilité maximale
+        - Taille de poche paramétrable
+        - Ne crée que dans les zones de gaz ou d'eau (pas dans le vide existant)
+        
+        Hypothèse : Les cavités vont être rapidement comblées par l'eau qui tombe et le gaz qui diffuse,
+        créant des flux de réorganisation intéressants.
+        """
+        if period <= 0:
+            raise ValueError("Le period doit être > 0.")
+        if step % period != 0:
+            return
+        
+        # Position aléatoire dans toute la grille
+        center_row = random.randint(pocket_size, self.grid_size - pocket_size - 1)
+        center_col = random.randint(pocket_size, self.grid_size - pocket_size - 1)
+        
+        # Créer une poche circulaire de vide
+        for i in range(max(0, center_row - pocket_size), min(self.grid_size, center_row + pocket_size + 1)):
+            for j in range(max(0, center_col - pocket_size), min(self.grid_size, center_row + pocket_size + 1)):
+                if (i - center_row) ** 2 + (j - center_col) ** 2 <= pocket_size ** 2:
+                    current_type = self._get_type_case(self.grid, i, j)
+                    # On ne crée du vide que là où il y a de la matière (pas déjà vide)
+                    if current_type in (TYPE_GAS, TYPE_WATER):
+                        self._set_type_case(self.grid, i, j, TYPE_EMPTY, 'creation_poche_vide')
+                        self._set_density_on_case(self.grid, i, j, 0.0, 'creation_poche_vide')
+    
+    
+    def _check_if_all_bellow_is_water(self, grid, row, col) -> bool:
+        """
+        Vérifie si toutes les cases en dessous (même colonne) sont de l'eau.
+        Utile pour décider si on peut faire de l'étalement latéral.
+        """
+        for r in range(row + 1, self.grid_size):
+            if self._get_type_case(grid, r, col) != TYPE_WATER:
+                return False
+        return True
     
     
     def _water_apply_switch(self):
@@ -536,17 +686,6 @@ class FluidSimulation:
                         self._set_density_on_case(new_grid, fi, fj, new_density, 'expansion_eau')
         
         self.grid = new_grid
-    
-    
-    def _check_if_all_bellow_is_water(self, grid, row, col) -> bool:
-        """
-        Vérifie si toutes les cases en dessous (même colonne) sont de l'eau.
-        Utile pour décider si on peut faire de l'étalement latéral.
-        """
-        for r in range(row + 1, self.grid_size):
-            if self._get_type_case(grid, r, col) != TYPE_WATER:
-                return False
-        return True
     
     
     def _apply_water_etalement(self):
@@ -969,14 +1108,33 @@ EAU: avant={self.water_before:.10f} après={water_after:.10f} diff={water_diff:.
 
 
 if __name__ == "__main__":
-    # Exécuter les 4 scénarios et générer un GIF séparé pour chacun
+    # Exécuter les scénarios avec leurs callbacks spécifiques
     scenario_registry: Dict[int, Dict[str, Any]] = {
-        1: {'label': 'scenario_1', 'init': FluidSimulation.initialize_scenario_1, 'callback': None},
-        2: {'label': 'scenario_2', 'init': FluidSimulation.initialize_scenario_2, 'callback': None},
-        3: {'label': 'scenario_3', 'init': FluidSimulation.initialize_scenario_3, 'callback': None},
-        4: {'label': 'scenario_4', 'init': FluidSimulation.initialize_scenario_4, 'callback': None},
-        5: {'label':    'scenario_5', 'init': FluidSimulation.initialize_scenario_5,
-            'callback': lambda sim, step: sim._periodic_top_water_injection(step, period=5)},
+        1: {
+            'label': 'scenario_1',
+            'init': FluidSimulation.initialize_scenario_1,
+            'callback': lambda sim, step: sim._random_gas_bubble_injection(step, period=15, bubble_size=2)
+        },
+        2: {
+            'label': 'scenario_2',
+            'init': FluidSimulation.initialize_scenario_2,
+            'callback': lambda sim, step: sim._create_random_void_pockets(step, period=30, pocket_size=2)
+        },
+        3: {
+            'label': 'scenario_3',
+            'init': FluidSimulation.initialize_scenario_3,
+            'callback': lambda sim, step: sim._periodic_lateral_water_spray(step, period=12, intensity=0.85)
+        },
+        4: {
+            'label': 'scenario_4',
+            'init': FluidSimulation.initialize_scenario_4,
+            'callback': lambda sim, step: sim._random_gas_bubble_injection(step, period=20, bubble_size=1)
+        },
+        5: {
+            'label': 'scenario_5',
+            'init': FluidSimulation.initialize_scenario_5,
+            'callback': lambda sim, step: sim._periodic_top_water_injection(step, period=5)
+        },
     }
     for sid, cfg in scenario_registry.items():
         print("=" * 80)
